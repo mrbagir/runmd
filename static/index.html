@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RunMD — Executable Markdown</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="h-screen flex overflow-hidden select-none">
+
+  <!-- SIDEBAR (Obsidian Vault Style) -->
+  <aside class="w-64 bg-[#0f0f11] border-r border-[#222227] flex flex-col justify-between shrink-0">
+    <div class="p-3 overflow-y-auto space-y-5 flex-1">
+      
+      <!-- Minimal Header -->
+      <div class="flex items-center justify-between px-2 pt-1 pb-2 border-b border-[#1f1f24]">
+        <div class="flex items-center space-x-2">
+          <svg class="w-4 h-4 text-[#7c6cf0]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+          </svg>
+          <span class="text-xs font-semibold tracking-wide text-[#dcdce5]">RunMD Vault</span>
+        </div>
+        <button onclick="createNewNote()" title="New Note" class="text-xs text-[#8e8e99] hover:text-[#ededf0] p-1 rounded hover:bg-[#1a1a20] transition">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Notes File List -->
+      <div>
+        <div class="flex items-center justify-between px-2 mb-1.5">
+          <span class="text-[11px] font-medium uppercase tracking-wider text-[#737380]">Notes</span>
+          <span id="noteCount" class="text-[10px] text-[#555560]">0</span>
+        </div>
+        <ul id="noteList" class="space-y-0.5 text-xs"></ul>
+      </div>
+
+      <!-- Connection Aliases -->
+      <div class="border-t border-[#1a1a20] pt-3">
+        <div class="flex items-center justify-between px-2 mb-1.5">
+          <span class="text-[11px] font-medium uppercase tracking-wider text-[#737380]">Connections</span>
+          <button onclick="toggleConnForm()" title="Add Connection Alias" class="text-[11px] text-[#8e8e99] hover:text-[#dcdce5] px-1 rounded hover:bg-[#1a1a20] transition">
+            + Alias
+          </button>
+        </div>
+
+        <!-- Inline Add Connection Form -->
+        <div id="connForm" class="hidden bg-[#16161a] p-2.5 rounded border border-[#2b2b33] mb-2 space-y-2 text-xs">
+          <input id="cAlias" placeholder="alias (e.g. pg_order)" class="w-full bg-[#101014] border border-[#2b2b33] rounded px-2 py-1 text-[#ededf0] focus:border-[#7c6cf0] focus:outline-none" />
+          <select id="cType" class="w-full bg-[#101014] border border-[#2b2b33] rounded px-2 py-1 text-[#c9c9d4] focus:border-[#7c6cf0] focus:outline-none">
+            <option value="sql">SQL (PostgreSQL / MySQL)</option>
+            <option value="redis">Redis</option>
+            <option value="rabbitmq">RabbitMQ</option>
+            <option value="mcp">MCP Server</option>
+          </select>
+          <input id="cURI" placeholder="DSN / URI / Command" class="w-full bg-[#101014] border border-[#2b2b33] rounded px-2 py-1 text-[#ededf0] focus:border-[#7c6cf0] focus:outline-none" />
+          <div class="flex gap-1.5 pt-1">
+            <button onclick="saveConnection()" class="flex-1 bg-[#2b2659] hover:bg-[#393175] text-[#d6d0ff] py-1 rounded text-[11px] font-medium transition">Save</button>
+            <button onclick="toggleConnForm()" class="bg-[#1f1f26] hover:bg-[#282832] text-[#8e8e99] px-2 py-1 rounded text-[11px] transition">Cancel</button>
+          </div>
+        </div>
+
+        <div id="connList" class="space-y-1 text-xs"></div>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- MAIN VIEWPORT -->
+  <main class="flex-1 flex flex-col h-full overflow-hidden bg-[#141416]">
+    
+    <!-- Ultra-Minimalist Top Header -->
+    <header class="h-11 bg-[#101012] border-b border-[#1f1f24] px-4 flex items-center justify-between shrink-0">
+      <div class="flex items-center space-x-1">
+        <button id="tabNotebook" onclick="switchView('notebook')" class="px-2.5 py-1 rounded text-xs font-medium bg-[#1e1e24] text-[#f4f4f7] transition flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5 text-[#8e8e99]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+          </svg>
+          <span>Document</span>
+        </button>
+        <button id="tabGraph" onclick="switchView('graph')" class="px-2.5 py-1 rounded text-xs font-medium text-[#8e8e99] hover:text-[#dcdce5] hover:bg-[#18181f] transition flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5 text-[#8e8e99]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="18" cy="5" r="3"></circle>
+            <circle cx="6" cy="12" r="3"></circle>
+            <circle cx="18" cy="19" r="3"></circle>
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+          </svg>
+          <span>Graph View</span>
+        </button>
+      </div>
+
+      <!-- Current Note Title & Mode Switch -->
+      <div class="flex items-center space-x-3">
+        <span id="activeNoteTitle" class="text-xs text-[#a0a0ab] font-mono"></span>
+        <div class="h-3.5 w-px bg-[#26262d]"></div>
+        <button id="btnRawToggle" onclick="toggleRawSource()" class="text-[11px] text-[#787885] hover:text-[#c4c4cf] px-2 py-0.5 rounded hover:bg-[#1a1a20] transition">
+          View Source
+        </button>
+      </div>
+    </header>
+
+    <!-- CONTENT AREA 1: HYBRID NOTEBOOK DOCUMENT -->
+    <section id="viewNotebook" class="flex-1 overflow-y-auto px-6 py-8">
+      <div class="max-w-4xl mx-auto">
+        
+        <!-- Raw Source Editor (Toggled via "View Source") -->
+        <div id="rawEditorContainer" class="hidden mb-6 bg-[#0f0f11] border border-[#27272e] rounded-lg p-4">
+          <div class="flex items-center justify-between pb-2 mb-3 border-b border-[#1f1f24] text-xs text-[#8e8e99]">
+            <span>Raw Markdown Source Editor</span>
+            <button onclick="saveAndExitRaw()" class="bg-[#2a245a] hover:bg-[#352e70] text-[#d6d0ff] px-2.5 py-1 rounded text-xs transition">Done &amp; Preview</button>
+          </div>
+          <textarea id="rawSourceTextarea" class="w-full h-80 bg-transparent text-[#ededf0] code-font text-xs leading-relaxed focus:outline-none resize-y"></textarea>
+        </div>
+
+        <!-- Rendered Flow Document (Hybrid Markdown + Interactive Executable Cells) -->
+        <div id="documentFlow" class="space-y-4"></div>
+
+      </div>
+    </section>
+
+    <!-- CONTENT AREA 2: OBSIDIAN GRAPH VIEW -->
+    <section id="viewGraph" class="hidden flex-1 relative bg-[#0b0b0d]">
+      <div class="absolute top-4 left-4 z-10 bg-[#121216]/90 backdrop-blur border border-[#22222a] p-3 rounded-lg text-xs space-y-1.5 shadow-lg text-[#8e8e99]">
+        <div class="font-semibold text-[#dcdce5] mb-1">Knowledge Graph</div>
+        <div class="flex items-center space-x-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-[#7c6cf0] inline-block"></span>
+          <span>Note (<code class="text-[#b5b5c2]">.md</code>) — click to open</span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <span class="w-2.5 h-2.5 rounded-sm bg-[#3f3f4a] inline-block"></span>
+          <span>Connection (<code class="text-[#b5b5c2]">@conn</code>)</span>
+        </div>
+      </div>
+      <div id="graphContainer" class="w-full h-full"></div>
+    </section>
+
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

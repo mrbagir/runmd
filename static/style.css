@@ -1,0 +1,141 @@
+:root {
+  --bg-main: #141416;
+  --bg-sidebar: #0f0f11;
+  --bg-surface: #1a1a1e;
+  --bg-code: #161619;
+  --border-subtle: #26262b;
+  --border-hover: #383842;
+  --text-main: #ededf0;
+  --text-muted: #8e8e99;
+  --accent-purple: #7c6cf0;
+  --accent-purple-dim: #332b6b;
+  --accent-emerald: #10b981;
+  --accent-rose: #f43f5e;
+}
+
+body {
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.code-font {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #2b2b32;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3e3e48;
+}
+
+/* Obsidian Markdown Typography */
+.md-preview h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #f4f4f7;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.md-preview h2 {
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: #eaeaf0;
+  margin-top: 1.4rem;
+  margin-bottom: 0.5rem;
+}
+.md-preview h3 {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: #dfdfe6;
+  margin-top: 1.2rem;
+  margin-bottom: 0.4rem;
+}
+.md-preview p {
+  font-size: 0.9375rem;
+  line-height: 1.68;
+  color: #c9c9d4;
+  margin-bottom: 0.85rem;
+}
+.md-preview ul, .md-preview ol {
+  margin-left: 1.5rem;
+  margin-bottom: 0.85rem;
+  color: #c9c9d4;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+.md-preview ul {
+  list-style-type: disc;
+}
+.md-preview ol {
+  list-style-type: decimal;
+}
+.md-preview li {
+  margin-bottom: 0.25rem;
+}
+.md-preview blockquote {
+  border-left: 3px solid #4a4a58;
+  padding-left: 1rem;
+  margin-left: 0;
+  color: #9c9ca8;
+  font-style: italic;
+  margin-bottom: 0.85rem;
+}
+.md-preview table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+}
+.md-preview th, .md-preview td {
+  border: 1px solid var(--border-subtle);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.md-preview th {
+  background: var(--bg-surface);
+  font-weight: 600;
+  color: #e4e4eb;
+}
+.md-preview strong {
+  font-weight: 600;
+  color: #ffffff;
+}
+.md-preview code:not(pre code) {
+  background: #1e1e24;
+  color: #e0d9ff;
+  padding: 0.15rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.84em;
+  border: 1px solid #2d2d38;
+  font-family: inherit;
+}
+
+/* Wikilink style (Obsidian) */
+.wikilink {
+  color: #9d8df7;
+  background: rgba(157, 141, 247, 0.1);
+  border-bottom: 1px dashed #7c6cf0;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  text-decoration: none;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+.wikilink:hover {
+  background: rgba(157, 141, 247, 0.22);
+  color: #b7abff;
+}

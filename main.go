@@ -3,10 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -18,8 +19,8 @@ import (
 	"time"
 )
 
-//go:embed index.html
-var indexHTML []byte
+//go:embed all:static
+var staticFS embed.FS
 
 // --- MODELS ---
 
@@ -476,11 +477,12 @@ func evaluateAssertion(rule string, output string, execSuccess bool) (bool, stri
 // --- HTTP HANDLERS & AI AGENT ENDPOINTS ---
 
 func (s *AppState) registerRoutes(mux *http.ServeMux) {
-	// Root Web UI
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(indexHTML)
-	})
+	// Root Web UI & Static Assets (from embedded static/ folder)
+	subFS, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		log.Fatalf("failed to create sub filesystem: %v", err)
+	}
+	mux.Handle("/", http.FileServer(http.FS(subFS)))
 
 	// 1. Notes CRUD
 	mux.HandleFunc("/api/notes", func(w http.ResponseWriter, r *http.Request) {
