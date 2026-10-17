@@ -1,0 +1,26 @@
+{
+  "mcp_fs": {
+    "alias": "mcp_fs",
+    "type": "mcp",
+    "uri": "npx -y @modelcontextprotocol/server-filesystem ./notes",
+    "config": null
+  },
+  "pg_order": {
+    "alias": "pg_order",
+    "type": "sql",
+    "uri": "postgres://postgres:secret@localhost:5432/orders_db?sslmode=disable",
+    "config": null
+  },
+  "redis_main": {
+    "alias": "redis_main",
+    "type": "redis",
+    "uri": "redis://localhost:6379/0",
+    "config": null
+  },
+  "rmq_local": {
+    "alias": "rmq_local",
+    "type": "rabbitmq",
+    "uri": "amqp://guest:guest@localhost:5672/",
+    "config": null
+  }
+}

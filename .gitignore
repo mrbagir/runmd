@@ -1,0 +1,22 @@
+# Compiled Binaries
+runmd
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.out
+bin/
+
+# User Runtime Data & Secrets
+connections.json
+notes/*
+!notes/.gitkeep
+
+# Operating System & Editor Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
