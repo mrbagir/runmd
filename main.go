@@ -102,7 +102,6 @@ func NewAppState(notesDir, connFile string) *AppState {
 		connections: make(map[string]Connection),
 	}
 	s.loadConnections()
-	s.seedInitialData()
 	return s
 }
 
@@ -143,67 +142,19 @@ func (s *AppState) saveConnections() {
 	_ = os.WriteFile(s.connFile, data, 0644)
 }
 
-func (s *AppState) seedInitialData() {
-	files, _ := os.ReadDir(s.notesDir)
-	if len(files) > 0 {
-		return
-	}
-
-	sample1 := `# Checkout & Order Runbook
-Catatan operasional ini terhubung ke [[payment-service]] dan [[incident-playbook]].
-
-## 1. Query Order Pending (SQL)
-Mengeksekusi query menggunakan alias koneksi **pg_order** dari sidebar:
-` + "```sql @conn=pg_order @assert=\"contains:ORD-\"\nSELECT id, customer_name, amount, status\nFROM orders\nWHERE status = 'PENDING'\nORDER BY created_at DESC LIMIT 3;\n```" + `
-
-## 2. Cek Cache Session (Redis)
-` + "```redis @conn=redis_main @assert=\"contains:active\"\nGET session:user:9981\n```" + `
-
-## 3. Publish Event ke RabbitMQ
-` + "```rabbitmq @conn=rmq_local @exchange=orders @routing_key=order.retry @assert=\"contains:Published\"\n{\"order_id\": \"ORD-2026-01\", \"action\": \"RETRY_PAYMENT\"}\n```" + `
-
-## 4. Test Webhook via cURL
-` + "```curl @assert=\"status == 200\"\ncurl -s -i https://httpbin.org/get?service=checkout\n```" + `
-
-## 5. Jalankan Script Validasi (Golang)
-` + "```go @assert=\"contains:VALID\"\npackage main\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"Status Pipeline: VALID & READY\")\n}\n```" + `
-
-## 6. Eksekusi Tool MCP
-` + "```mcp @conn=mcp_fs @tool=list_allowed_directories @assert=\"contains:notes\"\n{\"reason\": \"Check workspace directory\"}\n```" + `
-`
-
-	sample2 := `# Payment Service Architecture
-Bagian dari ekosistem [[checkout-runbook]]. Menggunakan koneksi database dan message broker yang sama.
-
-## Cek Health System via Shell
-` + "```sh @assert=\"contains:OK\"\necho \"Payment Gateway Ping: OK ($(date +%H:%M:%S))\"\n```" + `
-
-## Kalkulasi Fee via JavaScript
-` + "```js @assert=\"contains:Fee\"\nconst amount = 250000;\nconst fee = amount * 0.015;\nconsole.log(`Total Fee: Rp ${fee}`);\n```" + `
-`
-
-	sample3 := `# Incident Playbook
-Panduan mitigasi jika [[payment-service]] atau [[checkout-runbook]] mengalami peningkatan latensi.
-
-## Cek Koneksi Redis
-` + "```redis @conn=redis_main @assert=\"contains:PONG\"\nPING\n```" + `
-`
-
-	_ = os.WriteFile(filepath.Join(s.notesDir, "checkout-runbook.md"), []byte(sample1), 0644)
-	_ = os.WriteFile(filepath.Join(s.notesDir, "payment-service.md"), []byte(sample2), 0644)
-	_ = os.WriteFile(filepath.Join(s.notesDir, "incident-playbook.md"), []byte(sample3), 0644)
-}
-
 // --- MARKDOWN PARSER (BLOCKS & OBSIDIAN LINKS) ---
 
 var (
-	wikiLinkRegex  = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
+	wikiLinkRegex  = regexp.MustCompile(`\[\[([^\|\]#]+)(?:#[^\|\]]+)?(?:\|([^\]]+))?\]\]`)
 	codeBlockRegex = regexp.MustCompile("(?s)```([a-zA-Z0-9_-]+)([^\n]*)\n(.*?)```")
 	metaAttrRegex  = regexp.MustCompile(`@([a-zA-Z0-9_-]+)=("([^"]*)"|([^\s]+))`)
 )
 
 func ParseNote(name, content string) Note {
-	cleanName := strings.TrimSuffix(filepath.Base(name), ".md")
+	cleanName := filepath.ToSlash(name)
+	cleanName = strings.TrimPrefix(cleanName, "./")
+	cleanName = strings.TrimPrefix(cleanName, "/")
+	cleanName = strings.TrimSuffix(cleanName, ".md")
 	note := Note{
 		Name:       cleanName,
 		Content:    content,
@@ -487,16 +438,22 @@ func (s *AppState) registerRoutes(mux *http.ServeMux) {
 	// 1. Notes CRUD
 	mux.HandleFunc("/api/notes", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
-			files, _ := os.ReadDir(s.notesDir)
 			var notes []Note
-			for _, f := range files {
-				if strings.HasSuffix(f.Name(), ".md") {
-					b, err := os.ReadFile(filepath.Join(s.notesDir, f.Name()))
-					if err == nil {
-						notes = append(notes, ParseNote(f.Name(), string(b)))
+			_ = filepath.WalkDir(s.notesDir, func(path string, d fs.DirEntry, err error) error {
+				if err != nil || d == nil || d.IsDir() {
+					return nil
+				}
+				if strings.HasSuffix(d.Name(), ".md") {
+					rel, relErr := filepath.Rel(s.notesDir, path)
+					if relErr == nil {
+						b, readErr := os.ReadFile(path)
+						if readErr == nil {
+							notes = append(notes, ParseNote(filepath.ToSlash(rel), string(b)))
+						}
 					}
 				}
-			}
+				return nil
+			})
 			writeJSON(w, notes)
 			return
 		}
@@ -510,9 +467,12 @@ func (s *AppState) registerRoutes(mux *http.ServeMux) {
 				http.Error(w, "invalid request body", http.StatusBadRequest)
 				return
 			}
-			fname := strings.TrimSuffix(filepath.Base(req.Name), ".md") + ".md"
-			_ = os.WriteFile(filepath.Join(s.notesDir, fname), []byte(req.Content), 0644)
-			writeJSON(w, ParseNote(fname, req.Content))
+			rel := strings.TrimPrefix(filepath.Clean("/"+req.Name), "/")
+			rel = strings.TrimSuffix(rel, ".md") + ".md"
+			fullPath := filepath.Join(s.notesDir, rel)
+			_ = os.MkdirAll(filepath.Dir(fullPath), 0755)
+			_ = os.WriteFile(fullPath, []byte(req.Content), 0644)
+			writeJSON(w, ParseNote(filepath.ToSlash(rel), req.Content))
 			return
 		}
 
@@ -522,9 +482,11 @@ func (s *AppState) registerRoutes(mux *http.ServeMux) {
 				http.Error(w, "name query param required", http.StatusBadRequest)
 				return
 			}
-			fname := strings.TrimSuffix(filepath.Base(name), ".md") + ".md"
-			_ = os.Remove(filepath.Join(s.notesDir, fname))
-			writeJSON(w, map[string]string{"status": "deleted", "name": fname})
+			rel := strings.TrimPrefix(filepath.Clean("/"+name), "/")
+			rel = strings.TrimSuffix(rel, ".md") + ".md"
+			fullPath := filepath.Join(s.notesDir, rel)
+			_ = os.Remove(fullPath)
+			writeJSON(w, map[string]string{"status": "deleted", "name": rel})
 			return
 		}
 	})
@@ -600,13 +562,47 @@ func (s *AppState) registerRoutes(mux *http.ServeMux) {
 }
 
 func (s *AppState) RunFullNoteTest(noteName string) (map[string]any, error) {
-	fname := strings.TrimSuffix(filepath.Base(noteName), ".md") + ".md"
-	raw, err := os.ReadFile(filepath.Join(s.notesDir, fname))
+	clean := strings.TrimPrefix(filepath.ToSlash(noteName), "/")
+	clean = strings.TrimSuffix(clean, ".md")
+
+	// 1. Try direct file path
+	candidate := filepath.Join(s.notesDir, clean+".md")
+	raw, err := os.ReadFile(candidate)
+	foundPath := clean
+
+	// 2. Fallback: walk directory to find matching base or relative path
 	if err != nil {
-		return nil, fmt.Errorf("note '%s' tidak ditemukan di folder %s", fname, s.notesDir)
+		var matchedFullPath, matchedRelPath string
+		_ = filepath.WalkDir(s.notesDir, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil || d == nil || d.IsDir() {
+				return nil
+			}
+			if strings.HasSuffix(d.Name(), ".md") {
+				rel, relErr := filepath.Rel(s.notesDir, path)
+				if relErr == nil {
+					relSlash := strings.TrimSuffix(filepath.ToSlash(rel), ".md")
+					base := strings.TrimSuffix(d.Name(), ".md")
+					if relSlash == clean || base == filepath.Base(clean) {
+						matchedFullPath = path
+						matchedRelPath = relSlash
+						return fs.SkipAll
+					}
+				}
+			}
+			return nil
+		})
+
+		if matchedFullPath != "" {
+			raw, err = os.ReadFile(matchedFullPath)
+			foundPath = matchedRelPath
+		}
 	}
 
-	parsed := ParseNote(fname, string(raw))
+	if err != nil {
+		return nil, fmt.Errorf("note '%s' tidak ditemukan di folder %s", noteName, s.notesDir)
+	}
+
+	parsed := ParseNote(foundPath, string(raw))
 	var results []ExecResult
 	allPass := true
 
@@ -634,7 +630,6 @@ func (s *AppState) RunFullNoteTest(noteName string) (map[string]any, error) {
 }
 
 func (s *AppState) BuildGraph() GraphData {
-	files, _ := os.ReadDir(s.notesDir)
 	nodeMap := make(map[string]GraphNode)
 	var edges []GraphEdge
 
@@ -650,33 +645,41 @@ func (s *AppState) BuildGraph() GraphData {
 	}
 	s.mu.RUnlock()
 
-	// Add notes and scan connections/wikilinks
-	for _, f := range files {
-		if !strings.HasSuffix(f.Name(), ".md") {
-			continue
+	// Add notes recursively
+	_ = filepath.WalkDir(s.notesDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d == nil || d.IsDir() {
+			return nil
 		}
-		raw, err := os.ReadFile(filepath.Join(s.notesDir, f.Name()))
-		if err != nil {
-			continue
-		}
-		n := ParseNote(f.Name(), string(raw))
-		nodeMap[n.Name] = GraphNode{ID: n.Name, Label: n.Name + ".md", Group: "note"}
-
-		for _, target := range n.Links {
-			if _, exists := nodeMap[target]; !exists {
-				nodeMap[target] = GraphNode{ID: target, Label: target + ".md", Group: "note"}
+		if strings.HasSuffix(d.Name(), ".md") {
+			rel, relErr := filepath.Rel(s.notesDir, path)
+			if relErr != nil {
+				return nil
 			}
-			edges = append(edges, GraphEdge{From: n.Name, To: target, Label: "wikilink"})
-		}
-
-		for _, connAlias := range n.UsedConns {
-			connID := "conn:" + connAlias
-			if _, exists := nodeMap[connID]; !exists {
-				nodeMap[connID] = GraphNode{ID: connID, Label: "@" + connAlias, Group: "connection"}
+			relClean := filepath.ToSlash(rel)
+			raw, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return nil
 			}
-			edges = append(edges, GraphEdge{From: n.Name, To: connID, Label: "uses"})
+			n := ParseNote(relClean, string(raw))
+			nodeMap[n.Name] = GraphNode{ID: n.Name, Label: n.Name + ".md", Group: "note"}
+
+			for _, target := range n.Links {
+				if _, exists := nodeMap[target]; !exists {
+					nodeMap[target] = GraphNode{ID: target, Label: target + ".md", Group: "note"}
+				}
+				edges = append(edges, GraphEdge{From: n.Name, To: target, Label: "wikilink"})
+			}
+
+			for _, connAlias := range n.UsedConns {
+				connID := "conn:" + connAlias
+				if _, exists := nodeMap[connID]; !exists {
+					nodeMap[connID] = GraphNode{ID: connID, Label: "@" + connAlias, Group: "connection"}
+				}
+				edges = append(edges, GraphEdge{From: n.Name, To: connID, Label: "uses"})
+			}
 		}
-	}
+		return nil
+	})
 
 	var nodes []GraphNode
 	for _, v := range nodeMap {

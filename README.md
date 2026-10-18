@@ -60,7 +60,17 @@ Buka browser di:
 
 ---
 
-### 2. Opsi Flag CLI
+### 2. Mode Pengembangan (Live Reload dengan Fresh)
+Aplikasi telah dikonfigurasi dengan [gravityblast/fresh](https://github.com/gravityblast/fresh). Setiap kali ada perubahan pada file Go atau aset frontend di `static/`, server akan otomatis di-build dan di-restart:
+```bash
+fresh
+# Atau jika ~/go/bin belum masuk ke PATH sistem:
+~/go/bin/fresh
+```
+
+---
+
+### 3. Opsi Flag CLI
 | Flag | Default | Penjelasan |
 |------|---------|------------|
 | `-port` | `8080` | Port HTTP server |

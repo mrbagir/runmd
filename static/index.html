@@ -24,21 +24,23 @@
           </svg>
           <span class="text-xs font-semibold tracking-wide text-[#dcdce5]">RunMD Vault</span>
         </div>
-        <button onclick="createNewNote()" title="New Note" class="text-xs text-[#8e8e99] hover:text-[#ededf0] p-1 rounded hover:bg-[#1a1a20] transition">
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="12" y1="5" x2="12" y2="19"></line>
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-          </svg>
-        </button>
       </div>
 
-      <!-- Notes File List -->
+      <!-- Notes File List with Tree & Moved + Button -->
       <div>
         <div class="flex items-center justify-between px-2 mb-1.5">
-          <span class="text-[11px] font-medium uppercase tracking-wider text-[#737380]">Notes</span>
-          <span id="noteCount" class="text-[10px] text-[#555560]">0</span>
+          <div class="flex items-center space-x-1.5">
+            <span class="text-[11px] font-medium uppercase tracking-wider text-[#737380]">Notes</span>
+            <span id="noteCount" class="text-[10px] text-[#555560]">0</span>
+          </div>
+          <button onclick="createNewNote()" title="New Note in root" class="text-xs text-[#8e8e99] hover:text-[#ededf0] p-0.5 rounded hover:bg-[#1a1a20] transition">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
         </div>
-        <ul id="noteList" class="space-y-0.5 text-xs"></ul>
+        <div id="noteList" class="space-y-0.5 text-xs"></div>
       </div>
 
       <!-- Connection Aliases -->
@@ -107,24 +109,28 @@
       </div>
     </header>
 
-    <!-- CONTENT AREA 1: HYBRID NOTEBOOK DOCUMENT -->
-    <section id="viewNotebook" class="flex-1 overflow-y-auto px-6 py-8">
-      <div class="max-w-4xl mx-auto">
-        
-        <!-- Raw Source Editor (Toggled via "View Source") -->
-        <div id="rawEditorContainer" class="hidden mb-6 bg-[#0f0f11] border border-[#27272e] rounded-lg p-4">
-          <div class="flex items-center justify-between pb-2 mb-3 border-b border-[#1f1f24] text-xs text-[#8e8e99]">
-            <span>Raw Markdown Source Editor</span>
-            <button onclick="saveAndExitRaw()" class="bg-[#2a245a] hover:bg-[#352e70] text-[#d6d0ff] px-2.5 py-1 rounded text-xs transition">Done &amp; Preview</button>
-          </div>
-          <textarea id="rawSourceTextarea" class="w-full h-80 bg-transparent text-[#ededf0] code-font text-xs leading-relaxed focus:outline-none resize-y"></textarea>
+    <!-- CONTENT AREA 1: NOTEBOOK & RIGHT-SIDE DRAWER -->
+    <div id="contentContainer" class="flex-1 flex overflow-hidden">
+      <!-- LEFT/CENTER: HYBRID NOTEBOOK DOCUMENT -->
+      <section id="viewNotebook" class="flex-1 overflow-y-auto px-6 py-8">
+        <div class="max-w-4xl mx-auto">
+          <!-- Rendered Flow Document (Hybrid Markdown + Interactive Executable Cells) -->
+          <div id="documentFlow" class="space-y-2"></div>
         </div>
+      </section>
 
-        <!-- Rendered Flow Document (Hybrid Markdown + Interactive Executable Cells) -->
-        <div id="documentFlow" class="space-y-4"></div>
-
-      </div>
-    </section>
+      <!-- RIGHT DRAWER: Raw Markdown Source Editor (Collapsible Toggle) -->
+      <aside id="rawEditorPanel" class="hidden w-[40%] max-w-xl bg-[#0e0e11] border-l border-[#222228] flex flex-col shrink-0 h-full">
+        <div class="h-10 px-4 border-b border-[#1f1f24] flex items-center justify-between text-xs text-[#8e8e99] bg-[#111114]">
+          <span class="font-medium text-[#dcdce5]">Raw Markdown</span>
+          <div class="flex items-center space-x-2">
+            <button onclick="saveAndExitRaw()" class="text-[11px] bg-[#2a245a] hover:bg-[#352e70] text-[#d6d0ff] px-2.5 py-0.5 rounded transition">Sync</button>
+            <button onclick="toggleRawSource()" title="Close Source" class="text-[#8e8e99] hover:text-[#f43f5e] p-1 rounded hover:bg-[#1a1a20] transition">✕</button>
+          </div>
+        </div>
+        <textarea id="rawSourceTextarea" oninput="onRawInput()" class="flex-1 p-4 bg-transparent text-[#ededf0] code-font text-xs leading-relaxed focus:outline-none resize-none" placeholder="Type raw markdown here..."></textarea>
+      </aside>
+    </div>
 
     <!-- CONTENT AREA 2: OBSIDIAN GRAPH VIEW -->
     <section id="viewGraph" class="hidden flex-1 relative bg-[#0b0b0d]">

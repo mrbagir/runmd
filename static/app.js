@@ -3,6 +3,7 @@ let connections = {};
 let activeNote = null;
 let isRawMode = false;
 let cellOutputs = {}; // Cache cell outputs { [cellIdx]: result }
+let expandedFolders = new Set(['examples']); // Default expanded folders
 
 async function init() {
   await Promise.all([loadConnections(), loadNotes()]);
@@ -31,10 +32,11 @@ function renderConnections() {
     return;
   }
   list.forEach(c => {
+    // Point 4: Remove '@' from alias display
     el.innerHTML += `
       <div class="group flex items-center justify-between px-2 py-1.5 rounded hover:bg-[#16161b] transition">
         <div class="flex items-center space-x-1.5 truncate">
-          <span class="font-mono text-xs text-[#b8abfa]">@${c.alias}</span>
+          <span class="font-mono text-xs text-[#b8abfa]">${escapeHtml(c.alias)}</span>
           <span class="text-[9px] uppercase px-1 rounded bg-[#1c1c24] text-[#8e8e99] border border-[#262630]">${c.type}</span>
         </div>
         <button onclick="deleteConnection('${c.alias}')" title="Delete connection" class="opacity-0 group-hover:opacity-100 text-[#60606b] hover:text-[#f43f5e] text-xs px-1 transition">✕</button>
@@ -65,59 +67,153 @@ async function saveConnection() {
 }
 
 async function deleteConnection(alias) {
-  if (!confirm(`Remove connection alias '@${alias}'?`)) return;
+  if (!confirm(`Remove connection alias '${alias}'?`)) return;
   await fetch(`/api/connections?alias=${encodeURIComponent(alias)}`, { method: 'DELETE' });
   await loadConnections();
   if (activeNote) renderFlowDocument(activeNote);
 }
 
-// --- NOTES MANAGEMENT ---
+// --- NOTES MANAGEMENT & OBSIDIAN FOLDER TREE ---
 async function loadNotes() {
   try {
     const res = await fetch('/api/notes');
     notes = await res.json();
     document.getElementById('noteCount').innerText = notes.length;
-    renderNoteList();
+    renderNoteTree();
   } catch (e) {
     console.error('Failed to load notes', e);
   }
 }
 
-function renderNoteList() {
+// Point 3: Render Expand/Collapse folder hierarchy
+function renderNoteTree() {
   const el = document.getElementById('noteList');
   el.innerHTML = '';
+
+  // Group notes into root files and folder buckets
+  const rootNotes = [];
+  const folderMap = {}; // { [folderName]: [note1, note2] }
+
   notes.forEach(n => {
-    const isActive = activeNote && activeNote.name === n.name;
-    el.innerHTML += `
-      <li class="group flex items-center justify-between rounded px-2 py-1.5 transition ${
-        isActive ? 'bg-[#1e1e26] text-[#ededf0] font-medium' : 'text-[#9c9ca8] hover:bg-[#15151a] hover:text-[#dcdce5]'
-      }">
-        <button onclick="selectNote('${n.name}')" class="truncate flex-1 text-left">
-          ${n.name}.md
-        </button>
-        <button onclick="deleteNote('${n.name}')" title="Delete note" class="opacity-0 group-hover:opacity-100 text-[#60606b] hover:text-[#f43f5e] text-xs px-1 transition">✕</button>
-      </li>
+    const parts = n.name.split('/');
+    if (parts.length > 1) {
+      const folder = parts.slice(0, -1).join('/');
+      if (!folderMap[folder]) folderMap[folder] = [];
+      folderMap[folder].push(n);
+    } else {
+      rootNotes.push(n);
+    }
+  });
+
+  // Render Folders
+  Object.keys(folderMap).sort().forEach(folderName => {
+    const isExpanded = expandedFolders.has(folderName);
+    const childNotes = folderMap[folderName];
+
+    const folderContainer = document.createElement('div');
+    folderContainer.className = 'space-y-0.5';
+
+    // Folder Row Header
+    const folderRow = document.createElement('div');
+    folderRow.className = 'group flex items-center justify-between px-2 py-1.5 rounded hover:bg-[#15151a] cursor-pointer text-[#8e8e99] hover:text-[#dcdce5] transition';
+    folderRow.innerHTML = `
+      <div class="flex items-center space-x-1.5 truncate flex-1" onclick="toggleFolder('${folderName}')">
+        <span class="text-[10px] w-3 text-center">${isExpanded ? '▼' : '▶'}</span>
+        <svg class="w-3.5 h-3.5 text-[#7c6cf0]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+        </svg>
+        <span class="truncate font-medium">${escapeHtml(folderName)}</span>
+        <span class="text-[10px] text-[#555562]">(${childNotes.length})</span>
+      </div>
+      <button onclick="createNewNoteInFolder('${folderName}')" title="New Note in ${folderName}" class="opacity-0 group-hover:opacity-100 text-[#8e8e99] hover:text-[#ededf0] p-0.5 rounded hover:bg-[#1f1f26] transition">
+        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+      </button>
     `;
+    folderContainer.appendChild(folderRow);
+
+    // Child Files List
+    if (isExpanded) {
+      const childList = document.createElement('ul');
+      childList.className = 'pl-4 space-y-0.5 border-l border-[#1c1c24] ml-3';
+      childNotes.forEach(n => {
+        childList.appendChild(createNoteListItem(n));
+      });
+      folderContainer.appendChild(childList);
+    }
+
+    el.appendChild(folderContainer);
+  });
+
+  // Render Root Notes
+  rootNotes.forEach(n => {
+    el.appendChild(createNoteListItem(n));
   });
 }
 
+function createNoteListItem(n) {
+  const li = document.createElement('div');
+  const isActive = activeNote && activeNote.name === n.name;
+  const displayName = n.name.split('/').pop();
+
+  li.className = `group flex items-center justify-between rounded px-2 py-1.5 transition ${
+    isActive ? 'bg-[#1e1e26] text-[#ededf0] font-medium' : 'text-[#9c9ca8] hover:bg-[#15151a] hover:text-[#dcdce5]'
+  }`;
+
+  li.innerHTML = `
+    <button onclick="selectNote('${n.name}')" class="truncate flex-1 text-left flex items-center gap-1.5">
+      <svg class="w-3 h-3 text-[#555562]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+      </svg>
+      <span class="truncate">${escapeHtml(displayName)}.md</span>
+    </button>
+    <button onclick="deleteNote('${n.name}')" title="Delete note" class="opacity-0 group-hover:opacity-100 text-[#60606b] hover:text-[#f43f5e] text-xs px-1 transition">✕</button>
+  `;
+  return li;
+}
+
+function toggleFolder(folderName) {
+  if (expandedFolders.has(folderName)) {
+    expandedFolders.delete(folderName);
+  } else {
+    expandedFolders.add(folderName);
+  }
+  renderNoteTree();
+}
+
 function selectNote(name) {
-  const found = notes.find(n => n.name === name);
+  const cleanName = name.replace(/\.md$/, '').replace(/^\//, '');
+  const found = notes.find(n => n.name === cleanName || n.name.endsWith('/' + cleanName) || cleanName.endsWith('/' + n.name));
   if (!found) return;
   activeNote = found;
   cellOutputs = {}; // Reset output cache on note switch
   document.getElementById('activeNoteTitle').innerText = `${found.name}.md`;
-  renderNoteList();
+  renderNoteTree();
   renderFlowDocument(found);
+  if (isRawMode) {
+    document.getElementById('rawSourceTextarea').value = found.content;
+  }
 }
 
 async function createNewNote() {
-  const name = prompt('New note name (without .md):', 'new-runbook');
+  const name = prompt('New note name (e.g. runbook or folder/runbook):', 'new-runbook');
   if (!name) return;
-  const cleanName = name.replace(/\.md$/, '').trim();
+  await saveNewNoteWithName(name);
+}
+
+async function createNewNoteInFolder(folder) {
+  const name = prompt(`New note name inside '${folder}/':`, 'new-runbook');
+  if (!name) return;
+  await saveNewNoteWithName(`${folder}/${name}`);
+}
+
+async function saveNewNoteWithName(name) {
+  const cleanName = name.replace(/\.md$/, '').trim().replace(/^\//, '');
   if (!cleanName) return;
 
-  const defaultContent = `# ${cleanName}\nDouble click this text to edit.\n\n` +
+  const defaultContent = `# ${cleanName.split('/').pop()}\nDouble click this text to edit.\n\n` +
     "```sh @assert=\"contains:Hello\"\necho \"Hello from " + cleanName + "\"\n```\n";
 
   const res = await fetch('/api/notes', {
@@ -126,6 +222,8 @@ async function createNewNote() {
     body: JSON.stringify({ name: cleanName, content: defaultContent })
   });
   const created = await res.json();
+  const folder = cleanName.split('/').slice(0, -1).join('/');
+  if (folder) expandedFolders.add(folder);
   await loadNotes();
   selectNote(created.name);
 }
@@ -143,14 +241,12 @@ async function deleteNote(name) {
   }
 }
 
-// --- HYBRID JUPYTER-STYLE FLOW DOCUMENT ---
-// Parses raw markdown into alternating segments: Markdown text blocks and Code blocks
+// --- HYBRID FLOW DOCUMENT WITH FLOATING INSERT BUTTON ---
 function renderFlowDocument(note) {
   const container = document.getElementById('documentFlow');
   container.innerHTML = '';
 
   const content = note.content || '';
-  // Regex to split markdown content around fenced code blocks
   const codeBlockRegex = /```([a-zA-Z0-9_-]+)([^\n]*)\n([\s\S]*?)```/g;
   let lastIndex = 0;
   let segments = [];
@@ -178,23 +274,95 @@ function renderFlowDocument(note) {
     segments.push({ type: 'markdown', content: textAfter, segmentIndex: segments.length });
   }
 
-  // If document is empty
   if (segments.length === 0) {
     container.innerHTML = `
       <div class="text-[#666675] text-sm italic py-12 text-center">
-        Empty note. Click "View Source" above to write content.
+        Empty note. Click "View Source" or add a block below.
       </div>
     `;
+    // Add bottom insert block
+    container.appendChild(createInsertDivider(0));
     return;
   }
 
-  // Render each segment
-  segments.forEach(seg => {
+  // Render segments with floating insert dividers in between
+  segments.forEach((seg, i) => {
+    // Top insert divider before block
+    container.appendChild(createInsertDivider(i));
+
     if (seg.type === 'markdown') {
       container.appendChild(createMarkdownBlock(seg.content, seg.segmentIndex));
     } else if (seg.type === 'code') {
       container.appendChild(createCodeBlockElement(seg));
     }
+  });
+
+  // Bottom-most insert divider
+  container.appendChild(createInsertDivider(segments.length));
+}
+
+// Point 1: Floating '+' button divider between blocks
+function createInsertDivider(insertIndex) {
+  const div = document.createElement('div');
+  div.className = 'insert-divider';
+  div.innerHTML = `
+    <div class="insert-divider-line"></div>
+    <div class="insert-actions">
+      <button onclick="insertBlock(${insertIndex}, 'code')" class="insert-btn" title="Add executable code block">
+        <span class="text-[#10b981] font-bold">+</span> Code
+      </button>
+      <button onclick="insertBlock(${insertIndex}, 'text')" class="insert-btn" title="Add text/markdown section">
+        <span class="text-[#7c6cf0] font-bold">+</span> Text
+      </button>
+    </div>
+  `;
+  return div;
+}
+
+// Inserts a new Code or Markdown block at the given segment position
+async function insertBlock(insertIndex, type) {
+  if (!activeNote) return;
+
+  const codeBlockRegex = /```([a-zA-Z0-9_-]+)([^\n]*)\n([\s\S]*?)```/g;
+  const content = activeNote.content || '';
+  let lastIndex = 0;
+  let segments = [];
+  let match;
+
+  while ((match = codeBlockRegex.exec(content)) !== null) {
+    const textBefore = content.substring(lastIndex, match.index);
+    if (textBefore.trim().length > 0) {
+      segments.push(textBefore);
+    }
+    segments.push(match[0]);
+    lastIndex = match.index + match[0].length;
+  }
+  const textAfter = content.substring(lastIndex);
+  if (textAfter.trim().length > 0) {
+    segments.push(textAfter);
+  }
+
+  let newBlock = '';
+  if (type === 'code') {
+    newBlock = '\n```sh\necho "Hello world"\n```\n';
+  } else {
+    newBlock = '\nNew section description...\n';
+  }
+
+  segments.splice(insertIndex, 0, newBlock);
+  activeNote.content = segments.join('\n');
+  await saveActiveNoteContent();
+  renderFlowDocument(activeNote);
+}
+
+// Point 5: Support Obsidian links according to https://obsidian.md/id/help/links
+// [[target]], [[target|custom display]], [[target#heading]], [[target#heading|custom display]]
+function parseObsidianLinks(rawMd) {
+  const obsidianLinkRegex = /\[\[([^\|\]#]+)(?:#[^\|\]]+)?(?:\|([^\]]+))?\]\]/g;
+  return rawMd.replace(obsidianLinkRegex, (match, target, alias) => {
+    const cleanTarget = target.trim().replace(/\.md$/, '');
+    const displayText = alias ? alias.trim() : cleanTarget.split('/').pop();
+    return `<a href="javascript:void(0)" onclick="selectNote('${cleanTarget}')" class="wikilink" title="${cleanTarget}">${escapeHtml(displayText)}</a>`;
   });
 }
 
@@ -204,12 +372,7 @@ function createMarkdownBlock(rawMd, segIdx) {
   block.className = 'group relative py-1 px-2 rounded hover:bg-[#18181c]/50 transition';
   block.setAttribute('data-segment-index', segIdx);
 
-  // Render wikilinks [[link]] to clickable anchors
-  let processed = rawMd.replace(/\[\[([^\]]+)\]\]/g, (m, p1) => {
-    const cleanTarget = p1.trim().replace(/\.md$/, '');
-    return `<a href="javascript:void(0)" onclick="selectNote('${cleanTarget}')" class="wikilink">[[${cleanTarget}]]</a>`;
-  });
-
+  const processed = parseObsidianLinks(rawMd);
   const htmlContent = marked.parse(processed);
 
   // Preview view
@@ -218,7 +381,7 @@ function createMarkdownBlock(rawMd, segIdx) {
   previewDiv.innerHTML = htmlContent;
   previewDiv.title = 'Double click to edit text';
 
-  // Inline editor (hidden by default)
+  // Inline editor
   const editorDiv = document.createElement('div');
   editorDiv.className = 'hidden mt-2 mb-3 bg-[#111114] border border-[#2c2c36] rounded-md p-3';
   editorDiv.innerHTML = `
@@ -229,7 +392,6 @@ function createMarkdownBlock(rawMd, segIdx) {
     </div>
   `;
 
-  // Double-click to edit
   previewDiv.addEventListener('dblclick', () => {
     previewDiv.classList.add('hidden');
     editorDiv.classList.remove('hidden');
@@ -237,13 +399,11 @@ function createMarkdownBlock(rawMd, segIdx) {
     ta.focus();
   });
 
-  // Cancel button
   editorDiv.querySelector('.btn-cancel').addEventListener('click', () => {
     editorDiv.classList.add('hidden');
     previewDiv.classList.remove('hidden');
   });
 
-  // Save button
   editorDiv.querySelector('.btn-save').addEventListener('click', async () => {
     const updatedMd = editorDiv.querySelector('textarea').value;
     await updateSegmentContent(rawMd, updatedMd);
@@ -256,14 +416,13 @@ function createMarkdownBlock(rawMd, segIdx) {
 
 // Creates an Executable Fenced Code Block with embedded Run button and collapsible output drawer
 function createCodeBlockElement(seg) {
-  // Parse @conn and @assert from meta
-  const connMatch = seg.metaStr.match(/@conn=([^\s]+)/);
+  const connMatch = seg.metaStr.match(/@conn=([^\s]+)/) || seg.metaStr.match(/@([a-zA-Z0-9_-]+)/);
   const assertMatch = seg.metaStr.match(/@assert=("([^"]*)"|([^\s]+))/);
-  const conn = connMatch ? connMatch[1] : '';
+  const conn = connMatch ? (connMatch[1] || connMatch[0].replace(/^@/, '')) : '';
   const assertRule = assertMatch ? (assertMatch[2] || assertMatch[3]) : '';
 
   const card = document.createElement('div');
-  card.className = 'rounded-lg border border-[#222228] bg-[#161619] overflow-hidden my-3 shadow-sm transition hover:border-[#2d2d38]';
+  card.className = 'rounded-lg border border-[#222228] bg-[#161619] overflow-hidden my-2 shadow-sm transition hover:border-[#2d2d38]';
   card.id = `code-cell-${seg.cellIndex}`;
 
   const connBadge = conn ?
@@ -290,14 +449,13 @@ function createCodeBlockElement(seg) {
       </div>
     </div>
 
-    <!-- Code Content (Monospace editable) -->
+    <!-- Code Content -->
     <div class="p-3 bg-[#131316]">
       <textarea id="cell-code-${seg.cellIndex}" class="w-full bg-transparent text-[#ededf0] code-font text-xs leading-relaxed focus:outline-none resize-none font-normal" rows="${Math.max(1, seg.code.trim().split('\n').length)}">${escapeHtml(seg.code.trim())}</textarea>
     </div>
 
-    <!-- Floating Collapsible Output Drawer (Directly Underneath) -->
+    <!-- Floating Collapsible Output Drawer -->
     <div id="cell-drawer-${seg.cellIndex}" class="hidden border-t border-[#222228] bg-[#0c0c0e]">
-      <!-- Drawer Header: Status, Duration, Toggle, Clear -->
       <div class="px-3.5 py-1.5 border-b border-[#1b1b20] flex items-center justify-between text-xs bg-[#111114]">
         <div id="cell-status-${seg.cellIndex}" class="flex items-center space-x-2"></div>
         <div class="flex items-center space-x-2">
@@ -307,12 +465,10 @@ function createCodeBlockElement(seg) {
           <button onclick="clearOutput(${seg.cellIndex})" title="Clear output" class="text-[11px] text-[#60606b] hover:text-[#f43f5e] px-1 rounded hover:bg-[#1a1a22] transition">✕</button>
         </div>
       </div>
-      <!-- Drawer Body: Terminal stdout/stderr -->
       <div id="cell-body-${seg.cellIndex}" class="p-3.5 overflow-x-auto max-h-72 text-xs code-font text-[#c9c9d4] whitespace-pre-wrap leading-relaxed select-text"></div>
     </div>
   `;
 
-  // Cmd+Enter shortcut inside code textarea
   const ta = card.querySelector(`#cell-code-${seg.cellIndex}`);
   ta.addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -321,7 +477,6 @@ function createCodeBlockElement(seg) {
     }
   });
 
-  // Update height dynamically
   ta.addEventListener('input', () => {
     ta.rows = Math.max(1, ta.value.split('\n').length);
   });
@@ -345,7 +500,6 @@ async function runCell(idx) {
   statusEl.innerHTML = `<span class="text-[#8e8e99] animate-pulse">Running...</span>`;
   bodyEl.innerHTML = `<span class="text-[#555562]">Executing...</span>`;
 
-  // Reconstruct note code block metadata
   const parsedNote = parseMarkdownBlocks(activeNote.content);
   const blk = parsedNote.code_blocks[idx];
   if (!blk) return;
@@ -369,7 +523,6 @@ async function runCell(idx) {
     const data = await res.json();
     cellOutputs[idx] = data;
 
-    // Render Status badge
     const isPass = data.success && data.assert_pass;
     const statusBadge = isPass ?
       `<span class="text-[#10b981] font-semibold flex items-center gap-1"><span>✔ PASS</span> <span class="text-[#60606b] font-normal text-[10px]">(${data.duration_ms}ms)</span></span>` :
@@ -379,8 +532,6 @@ async function runCell(idx) {
       `<span class="text-[11px] text-[#8e8e99] truncate max-w-sm" title="${escapeHtml(data.assert_msg)}">${escapeHtml(data.assert_msg)}</span>` : '';
 
     statusEl.innerHTML = `${statusBadge} <span class="text-[#33333d]">|</span> ${assertText}`;
-
-    // Render Output text
     const outputText = data.output || data.error || '(Process completed with no output)';
     bodyEl.innerHTML = escapeHtml(outputText);
 
@@ -408,7 +559,7 @@ function clearOutput(idx) {
   delete cellOutputs[idx];
 }
 
-// --- REPLACING / UPDATING SEGMENTS ON EDIT ---
+// --- UPDATING SEGMENTS ON EDIT ---
 async function updateSegmentContent(oldText, newText) {
   if (!activeNote || oldText === newText) {
     renderFlowDocument(activeNote);
@@ -427,32 +578,38 @@ async function saveActiveNoteContent() {
     body: JSON.stringify({ name: activeNote.name, content: activeNote.content })
   });
   activeNote = await res.json();
-  await loadNotes();
+  if (isRawMode) {
+    document.getElementById('rawSourceTextarea').value = activeNote.content;
+  }
 }
 
-// --- RAW SOURCE MODE TOGGLE ---
+// --- POINT 2: RIGHT DRAWER / SPLIT PANEL VIEW SOURCE ---
 function toggleRawSource() {
-  const container = document.getElementById('rawEditorContainer');
+  const panel = document.getElementById('rawEditorPanel');
   const textarea = document.getElementById('rawSourceTextarea');
   const btn = document.getElementById('btnRawToggle');
 
   isRawMode = !isRawMode;
   if (isRawMode) {
-    container.classList.remove('hidden');
+    panel.classList.remove('hidden');
     textarea.value = activeNote ? activeNote.content : '';
     btn.innerText = 'Hide Source';
     textarea.focus();
   } else {
-    container.classList.add('hidden');
+    panel.classList.add('hidden');
     btn.innerText = 'View Source';
   }
+}
+
+function onRawInput() {
+  // Live typing in raw editor
+  if (!activeNote) return;
 }
 
 async function saveAndExitRaw() {
   if (!activeNote) return;
   activeNote.content = document.getElementById('rawSourceTextarea').value;
   await saveActiveNoteContent();
-  toggleRawSource();
   renderFlowDocument(activeNote);
 }
 
@@ -477,10 +634,14 @@ function parseMarkdownBlocks(content) {
       meta[k] = val;
     }
 
+    // Also support @alias shorthand
+    const connShort = headerMeta.match(/@([a-zA-Z0-9_-]+)/);
+    const conn = meta.conn || (connShort && connShort[1] !== 'conn' && connShort[1] !== 'assert' ? connShort[1] : '');
+
     code_blocks.push({
       index: idx++,
       lang: lang,
-      conn: meta.conn || '',
+      conn: conn,
       assert: meta.assert || '',
       meta: meta,
       code: code
@@ -493,7 +654,7 @@ function parseMarkdownBlocks(content) {
 // --- GRAPH VIEW ---
 function switchView(view) {
   const isNotebook = view === 'notebook';
-  document.getElementById('viewNotebook').classList.toggle('hidden', !isNotebook);
+  document.getElementById('contentContainer').classList.toggle('hidden', !isNotebook);
   document.getElementById('viewGraph').classList.toggle('hidden', isNotebook);
 
   document.getElementById('tabNotebook').className = isNotebook ?

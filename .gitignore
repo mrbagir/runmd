@@ -7,11 +7,16 @@ runmd
 *.dylib
 *.out
 bin/
+tmp/
+runner-build*
+runner.conf
 
 # User Runtime Data & Secrets
 connections.json
 notes/*
 !notes/.gitkeep
+!notes/examples/
+!notes/examples/**
 
 # Operating System & Editor Files
 .DS_Store

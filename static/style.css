@@ -127,7 +127,6 @@ body {
 .wikilink {
   color: #9d8df7;
   background: rgba(157, 141, 247, 0.1);
-  border-bottom: 1px dashed #7c6cf0;
   padding: 0.1rem 0.35rem;
   border-radius: 3px;
   text-decoration: none;
@@ -138,4 +137,55 @@ body {
 .wikilink:hover {
   background: rgba(157, 141, 247, 0.22);
   color: #b7abff;
+}
+
+/* Floating insert cell divider */
+.insert-divider {
+  position: relative;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 4px 0;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.insert-divider:hover, .insert-divider:focus-within {
+  opacity: 1;
+}
+.insert-divider-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: #2b2b35;
+  z-index: 1;
+}
+.insert-actions {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #141416;
+  padding: 0 8px;
+}
+.insert-btn {
+  font-size: 11px;
+  color: #9ca3af;
+  background: #1e1e26;
+  border: 1px solid #2c2c36;
+  border-radius: 12px;
+  padding: 2px 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+.insert-btn:hover {
+  color: #ffffff;
+  background: #2b2659;
+  border-color: #3b3475;
 }
