@@ -119,12 +119,15 @@
         </div>
       </section>
 
-      <!-- RIGHT DRAWER: Raw Markdown Source Editor (Collapsible Toggle) -->
-      <aside id="rawEditorPanel" class="hidden w-[40%] max-w-xl bg-[#0e0e11] border-l border-[#222228] flex flex-col shrink-0 h-full">
+      <!-- RESIZER DIVIDER -->
+      <div id="rawResizer" class="hidden w-1.5 hover:w-1.5 bg-[#1b1b22] hover:bg-[#7c6cf0] active:bg-[#7c6cf0] cursor-col-resize select-none transition shrink-0 z-20"></div>
+
+      <!-- RIGHT DRAWER: Raw Markdown Source Editor (Collapsible & Resizable) -->
+      <aside id="rawEditorPanel" class="hidden w-[30%] min-w-[240px] max-w-[80vw] bg-[#0e0e11] border-l border-[#222228] flex flex-col shrink-0 h-full">
         <div class="h-10 px-4 border-b border-[#1f1f24] flex items-center justify-between text-xs text-[#8e8e99] bg-[#111114]">
           <span class="font-medium text-[#dcdce5]">Raw Markdown</span>
           <div class="flex items-center space-x-2">
-            <button onclick="saveAndExitRaw()" class="text-[11px] bg-[#2a245a] hover:bg-[#352e70] text-[#d6d0ff] px-2.5 py-0.5 rounded transition">Sync</button>
+            <span id="rawSyncStatus" class="text-[10px] text-[#555562] font-mono">auto-sync</span>
             <button onclick="toggleRawSource()" title="Close Source" class="text-[#8e8e99] hover:text-[#f43f5e] p-1 rounded hover:bg-[#1a1a20] transition">✕</button>
           </div>
         </div>

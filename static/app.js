@@ -6,6 +6,7 @@ let cellOutputs = {}; // Cache cell outputs { [cellIdx]: result }
 let expandedFolders = new Set(['examples']); // Default expanded folders
 
 async function init() {
+  initResizer();
   await Promise.all([loadConnections(), loadNotes()]);
   if (notes.length > 0) {
     selectNote(notes[0].name);
@@ -241,12 +242,8 @@ async function deleteNote(name) {
   }
 }
 
-// --- HYBRID FLOW DOCUMENT WITH FLOATING INSERT BUTTON ---
-function renderFlowDocument(note) {
-  const container = document.getElementById('documentFlow');
-  container.innerHTML = '';
-
-  const content = note.content || '';
+// --- HYBRID FLOW DOCUMENT WITH SEGMENTS & DELETE SUPPORT ---
+function getDocumentSegments(content) {
   const codeBlockRegex = /```([a-zA-Z0-9_-]+)([^\n]*)\n([\s\S]*?)```/g;
   let lastIndex = 0;
   let segments = [];
@@ -256,7 +253,12 @@ function renderFlowDocument(note) {
   while ((match = codeBlockRegex.exec(content)) !== null) {
     const textBefore = content.substring(lastIndex, match.index);
     if (textBefore.trim().length > 0) {
-      segments.push({ type: 'markdown', content: textBefore, segmentIndex: segments.length });
+      segments.push({
+        type: 'markdown',
+        content: textBefore,
+        raw: textBefore,
+        segmentIndex: segments.length
+      });
     }
     segments.push({
       type: 'code',
@@ -265,14 +267,29 @@ function renderFlowDocument(note) {
       code: match[3],
       cellIndex: cellIndex++,
       segmentIndex: segments.length,
-      fullMatch: match[0]
+      fullMatch: match[0],
+      raw: match[0]
     });
     lastIndex = match.index + match[0].length;
   }
   const textAfter = content.substring(lastIndex);
   if (textAfter.trim().length > 0) {
-    segments.push({ type: 'markdown', content: textAfter, segmentIndex: segments.length });
+    segments.push({
+      type: 'markdown',
+      content: textAfter,
+      raw: textAfter,
+      segmentIndex: segments.length
+    });
   }
+  return segments;
+}
+
+function renderFlowDocument(note) {
+  const container = document.getElementById('documentFlow');
+  container.innerHTML = '';
+
+  const content = note.content || '';
+  const segments = getDocumentSegments(content);
 
   if (segments.length === 0) {
     container.innerHTML = `
@@ -301,7 +318,7 @@ function renderFlowDocument(note) {
   container.appendChild(createInsertDivider(segments.length));
 }
 
-// Point 1: Floating '+' button divider between blocks
+// Floating '+' button divider between blocks
 function createInsertDivider(insertIndex) {
   const div = document.createElement('div');
   div.className = 'insert-divider';
@@ -323,34 +340,33 @@ function createInsertDivider(insertIndex) {
 async function insertBlock(insertIndex, type) {
   if (!activeNote) return;
 
-  const codeBlockRegex = /```([a-zA-Z0-9_-]+)([^\n]*)\n([\s\S]*?)```/g;
-  const content = activeNote.content || '';
-  let lastIndex = 0;
-  let segments = [];
-  let match;
-
-  while ((match = codeBlockRegex.exec(content)) !== null) {
-    const textBefore = content.substring(lastIndex, match.index);
-    if (textBefore.trim().length > 0) {
-      segments.push(textBefore);
-    }
-    segments.push(match[0]);
-    lastIndex = match.index + match[0].length;
-  }
-  const textAfter = content.substring(lastIndex);
-  if (textAfter.trim().length > 0) {
-    segments.push(textAfter);
-  }
-
+  const segments = getDocumentSegments(activeNote.content || '');
   let newBlock = '';
   if (type === 'code') {
-    newBlock = '\n```sh\necho "Hello world"\n```\n';
+    newBlock = '```sh\necho "Hello world"\n```';
   } else {
-    newBlock = '\nNew section description...\n';
+    newBlock = 'New section description...';
   }
 
-  segments.splice(insertIndex, 0, newBlock);
-  activeNote.content = segments.join('\n');
+  segments.splice(insertIndex, 0, { raw: newBlock });
+  activeNote.content = segments.map(s => s.raw.trim()).filter(Boolean).join('\n\n') + '\n';
+  await saveActiveNoteContent();
+  renderFlowDocument(activeNote);
+}
+
+// Deletes a specific block (either code or markdown text) by segment index
+async function deleteBlock(segIndex) {
+  if (!activeNote) return;
+
+  const segments = getDocumentSegments(activeNote.content || '');
+  if (segIndex < 0 || segIndex >= segments.length) return;
+
+  const target = segments[segIndex];
+  const desc = target.type === 'code' ? `blok kode (${target.lang})` : 'blok teks';
+  if (!confirm(`Hapus ${desc} ini?`)) return;
+
+  segments.splice(segIndex, 1);
+  activeNote.content = segments.map(s => s.raw.trim()).filter(Boolean).join('\n\n') + '\n';
   await saveActiveNoteContent();
   renderFlowDocument(activeNote);
 }
@@ -366,13 +382,14 @@ function parseObsidianLinks(rawMd) {
   });
 }
 
-// Creates an Obsidian-style rendered Markdown block with double-click inline editing
+// Creates an Obsidian-style rendered Markdown block with double-click inline editing and delete button
 function createMarkdownBlock(rawMd, segIdx) {
   const block = document.createElement('div');
-  block.className = 'group relative py-1 px-2 rounded hover:bg-[#18181c]/50 transition';
+  block.className = 'group relative py-0.5 px-2 rounded hover:bg-[#18181c]/50 transition';
   block.setAttribute('data-segment-index', segIdx);
 
-  const processed = parseObsidianLinks(rawMd);
+  const trimmedMd = rawMd.trim();
+  const processed = parseObsidianLinks(trimmedMd);
   const htmlContent = marked.parse(processed);
 
   // Preview view
@@ -381,34 +398,77 @@ function createMarkdownBlock(rawMd, segIdx) {
   previewDiv.innerHTML = htmlContent;
   previewDiv.title = 'Double click to edit text';
 
-  // Inline editor
-  const editorDiv = document.createElement('div');
-  editorDiv.className = 'hidden mt-2 mb-3 bg-[#111114] border border-[#2c2c36] rounded-md p-3';
-  editorDiv.innerHTML = `
-    <textarea class="w-full bg-transparent text-[#ededf0] code-font text-xs leading-relaxed focus:outline-none resize-y" rows="5">${escapeHtml(rawMd)}</textarea>
-    <div class="flex justify-end gap-2 mt-2 pt-2 border-t border-[#1f1f26]">
-      <button class="btn-cancel text-xs text-[#8e8e99] hover:text-[#dcdce5] px-2 py-1 rounded">Cancel</button>
-      <button class="btn-save text-xs bg-[#2b2659] hover:bg-[#393175] text-[#d6d0ff] px-3 py-1 rounded font-medium">Save</button>
-    </div>
+  // Hover Action Buttons (Delete only, Edit button removed)
+  const actionsDiv = document.createElement('div');
+  actionsDiv.className = 'absolute top-1 right-2 opacity-0 group-hover:opacity-100 transition flex items-center bg-[#141418] px-1.5 py-0.5 rounded border border-[#262630] text-xs shadow-sm z-10';
+  actionsDiv.innerHTML = `
+    <button onclick="deleteBlock(${segIdx})" class="text-[11px] text-[#60606b] hover:text-[#f43f5e] px-1" title="Delete text block">✕</button>
   `;
+
+  // Inline editor without footer, compact and auto-resizing
+  const editorDiv = document.createElement('div');
+  editorDiv.className = 'hidden my-1 bg-[#111114] border border-[#2c2c36] rounded p-2';
+  editorDiv.innerHTML = `
+    <textarea class="w-full bg-transparent text-[#ededf0] code-font text-xs leading-relaxed focus:outline-none resize-none overflow-hidden m-0 p-0 block" placeholder="Type markdown here...">${escapeHtml(trimmedMd)}</textarea>
+  `;
+
+  const ta = editorDiv.querySelector('textarea');
+
+  const autoResize = () => {
+    ta.style.height = 'auto';
+    ta.style.height = `${Math.max(28, ta.scrollHeight)}px`;
+  };
+
+  ta.addEventListener('input', autoResize);
+
+  let isSaving = false;
+  let outsideClickListener = null;
+
+  const finishEdit = async () => {
+    if (editorDiv.classList.contains('hidden') || isSaving) return;
+    isSaving = true;
+    if (outsideClickListener) {
+      document.removeEventListener('pointerdown', outsideClickListener);
+      outsideClickListener = null;
+    }
+
+    const updatedVal = ta.value.trim();
+    editorDiv.classList.add('hidden');
+    previewDiv.classList.remove('hidden');
+    actionsDiv.classList.remove('hidden');
+
+    if (updatedVal !== trimmedMd) {
+      await updateSegmentByIndex(segIdx, updatedVal);
+    }
+    isSaving = false;
+  };
+
+  outsideClickListener = (e) => {
+    if (!block.contains(e.target)) {
+      finishEdit();
+    }
+  };
 
   previewDiv.addEventListener('dblclick', () => {
     previewDiv.classList.add('hidden');
+    actionsDiv.classList.add('hidden');
     editorDiv.classList.remove('hidden');
-    const ta = editorDiv.querySelector('textarea');
     ta.focus();
+    autoResize();
+    document.addEventListener('pointerdown', outsideClickListener);
   });
 
-  editorDiv.querySelector('.btn-cancel').addEventListener('click', () => {
-    editorDiv.classList.add('hidden');
-    previewDiv.classList.remove('hidden');
+  ta.addEventListener('blur', async () => {
+    await finishEdit();
   });
 
-  editorDiv.querySelector('.btn-save').addEventListener('click', async () => {
-    const updatedMd = editorDiv.querySelector('textarea').value;
-    await updateSegmentContent(rawMd, updatedMd);
+  ta.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      ta.blur();
+    }
   });
 
+  block.appendChild(actionsDiv);
   block.appendChild(previewDiv);
   block.appendChild(editorDiv);
   return block;
@@ -446,6 +506,9 @@ function createCodeBlockElement(seg) {
           </svg>
           <span>Run</span>
         </button>
+        <button onclick="deleteBlock(${seg.segmentIndex})" title="Delete code block" class="text-[#60606b] hover:text-[#f43f5e] hover:bg-[#201a1e] px-1.5 py-1 rounded transition text-xs font-bold">
+          ✕
+        </button>
       </div>
     </div>
 
@@ -479,6 +542,14 @@ function createCodeBlockElement(seg) {
 
   ta.addEventListener('input', () => {
     ta.rows = Math.max(1, ta.value.split('\n').length);
+  });
+
+  ta.addEventListener('change', async () => {
+    const newCode = ta.value;
+    const newFullMatch = "```" + seg.lang + (seg.metaStr ? " " + seg.metaStr : "") + "\n" + newCode + "\n```";
+    if (newFullMatch !== seg.raw) {
+      await updateSegmentByIndex(seg.segmentIndex, newFullMatch);
+    }
   });
 
   return card;
@@ -560,6 +631,21 @@ function clearOutput(idx) {
 }
 
 // --- UPDATING SEGMENTS ON EDIT ---
+async function updateSegmentByIndex(segIndex, newText) {
+  if (!activeNote) return;
+  const segments = getDocumentSegments(activeNote.content || '');
+  if (segIndex < 0 || segIndex >= segments.length) return;
+
+  if (newText.trim().length === 0) {
+    segments.splice(segIndex, 1);
+  } else {
+    segments[segIndex].raw = newText.trim();
+  }
+  activeNote.content = segments.map(s => s.raw.trim()).filter(Boolean).join('\n\n') + '\n';
+  await saveActiveNoteContent();
+  renderFlowDocument(activeNote);
+}
+
 async function updateSegmentContent(oldText, newText) {
   if (!activeNote || oldText === newText) {
     renderFlowDocument(activeNote);
@@ -579,31 +665,80 @@ async function saveActiveNoteContent() {
   });
   activeNote = await res.json();
   if (isRawMode) {
-    document.getElementById('rawSourceTextarea').value = activeNote.content;
+    const rawTa = document.getElementById('rawSourceTextarea');
+    if (rawTa && document.activeElement !== rawTa) {
+      rawTa.value = activeNote.content;
+    }
   }
 }
 
-// --- POINT 2: RIGHT DRAWER / SPLIT PANEL VIEW SOURCE ---
+// --- RESIZABLE SPLIT PANEL & AUTO-SYNC VIEW SOURCE ---
+function initResizer() {
+  const resizer = document.getElementById('rawResizer');
+  const panel = document.getElementById('rawEditorPanel');
+  if (!resizer || !panel) return;
+
+  let isResizing = false;
+
+  resizer.addEventListener('mousedown', e => {
+    isResizing = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  window.addEventListener('mousemove', e => {
+    if (!isResizing) return;
+    const newWidth = window.innerWidth - e.clientX;
+    const minW = 200;
+    const maxW = window.innerWidth * 0.8;
+    if (newWidth >= minW && newWidth <= maxW) {
+      panel.style.width = `${newWidth}px`;
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (isResizing) {
+      isResizing = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  });
+}
+
 function toggleRawSource() {
   const panel = document.getElementById('rawEditorPanel');
+  const resizer = document.getElementById('rawResizer');
   const textarea = document.getElementById('rawSourceTextarea');
   const btn = document.getElementById('btnRawToggle');
 
   isRawMode = !isRawMode;
   if (isRawMode) {
     panel.classList.remove('hidden');
+    if (resizer) resizer.classList.remove('hidden');
     textarea.value = activeNote ? activeNote.content : '';
     btn.innerText = 'Hide Source';
     textarea.focus();
   } else {
     panel.classList.add('hidden');
+    if (resizer) resizer.classList.add('hidden');
     btn.innerText = 'View Source';
   }
 }
 
+let rawSyncTimer = null;
 function onRawInput() {
-  // Live typing in raw editor
   if (!activeNote) return;
+  const statusEl = document.getElementById('rawSyncStatus');
+  if (statusEl) statusEl.innerText = 'syncing...';
+
+  clearTimeout(rawSyncTimer);
+  rawSyncTimer = setTimeout(async () => {
+    if (!activeNote) return;
+    activeNote.content = document.getElementById('rawSourceTextarea').value;
+    await saveActiveNoteContent();
+    renderFlowDocument(activeNote);
+    if (statusEl) statusEl.innerText = 'synced';
+  }, 350);
 }
 
 async function saveAndExitRaw() {
