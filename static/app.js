@@ -3,7 +3,27 @@ let connections = {};
 let activeNote = null;
 let isRawMode = false;
 let cellOutputs = {}; // Cache cell outputs { [cellIdx]: result }
-let expandedFolders = new Set(['examples', 'test']); // Default expanded folders
+let expandedFolders = loadExpandedFolders();
+
+function loadExpandedFolders() {
+  try {
+    const saved = localStorage.getItem('runmd_expanded_folders');
+    if (saved) return new Set(JSON.parse(saved));
+  } catch (e) {
+    console.error('Failed to parse expandedFolders from localStorage', e);
+  }
+  return null; // Signals first visit: will dynamically auto-expand all folders
+}
+
+function saveExpandedFolders() {
+  try {
+    if (expandedFolders) {
+      localStorage.setItem('runmd_expanded_folders', JSON.stringify(Array.from(expandedFolders)));
+    }
+  } catch (e) {
+    console.error('Failed to save expandedFolders to localStorage', e);
+  }
+}
 
 async function init() {
   initResizer();
@@ -80,6 +100,19 @@ async function loadNotes() {
     const res = await fetch('/api/notes');
     notes = await res.json();
     document.getElementById('noteCount').innerText = notes.length;
+
+    // Dynamically auto-expand all folders on first visit (no localStorage saved yet)
+    if (expandedFolders === null) {
+      expandedFolders = new Set();
+      notes.forEach(n => {
+        const parts = n.name.split('/');
+        for (let i = 1; i < parts.length; i++) {
+          expandedFolders.add(parts.slice(0, i).join('/'));
+        }
+      });
+      saveExpandedFolders();
+    }
+
     renderNoteTree();
   } catch (e) {
     console.error('Failed to load notes', e);
@@ -222,11 +255,13 @@ function createNoteListItem(n) {
 }
 
 function toggleFolder(folderPath) {
+  if (!expandedFolders) expandedFolders = new Set();
   if (expandedFolders.has(folderPath)) {
     expandedFolders.delete(folderPath);
   } else {
     expandedFolders.add(folderPath);
   }
+  saveExpandedFolders();
   renderNoteTree();
 }
 
@@ -239,10 +274,17 @@ function selectNote(name) {
   document.getElementById('activeNoteTitle').innerText = `${found.name}.md`;
 
   // Auto-expand all parent folders of the selected note
+  if (!expandedFolders) expandedFolders = new Set();
   const parts = found.name.split('/');
+  let changed = false;
   for (let i = 1; i < parts.length; i++) {
-    expandedFolders.add(parts.slice(0, i).join('/'));
+    const p = parts.slice(0, i).join('/');
+    if (!expandedFolders.has(p)) {
+      expandedFolders.add(p);
+      changed = true;
+    }
   }
+  if (changed) saveExpandedFolders();
 
   renderNoteTree();
   renderFlowDocument(found);
@@ -278,10 +320,12 @@ async function saveNewNoteWithName(name) {
   const created = await res.json();
 
   // Auto-expand all parent folders
+  if (!expandedFolders) expandedFolders = new Set();
   const parts = cleanName.split('/');
   for (let i = 1; i < parts.length; i++) {
     expandedFolders.add(parts.slice(0, i).join('/'));
   }
+  saveExpandedFolders();
 
   await loadNotes();
   selectNote(created.name);
