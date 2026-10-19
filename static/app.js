@@ -3,7 +3,7 @@ let connections = {};
 let activeNote = null;
 let isRawMode = false;
 let cellOutputs = {}; // Cache cell outputs { [cellIdx]: result }
-let expandedFolders = new Set(['examples']); // Default expanded folders
+let expandedFolders = new Set(['examples', 'test']); // Default expanded folders
 
 async function init() {
   initResizer();
@@ -86,72 +86,118 @@ async function loadNotes() {
   }
 }
 
-// Point 3: Render Expand/Collapse folder hierarchy
+// Helper to safely escape string for inline JS handlers
+function escapeJsString(str) {
+  return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+// Build hierarchical folder tree from flat notes list
+function buildNoteTree(notesList) {
+  const root = {
+    name: '',
+    path: '',
+    folders: {},
+    files: []
+  };
+
+  notesList.forEach(n => {
+    const parts = n.name.split('/');
+    let current = root;
+
+    for (let i = 0; i < parts.length - 1; i++) {
+      const part = parts[i];
+      const currentPath = parts.slice(0, i + 1).join('/');
+      if (!current.folders[part]) {
+        current.folders[part] = {
+          name: part,
+          path: currentPath,
+          folders: {},
+          files: []
+        };
+      }
+      current = current.folders[part];
+    }
+
+    current.files.push(n);
+  });
+
+  return root;
+}
+
+// Calculate total descendant notes inside a folder node
+function countTotalNotes(node) {
+  let count = node.files.length;
+  for (const sub of Object.values(node.folders)) {
+    count += countTotalNotes(sub);
+  }
+  return count;
+}
+
+// Render recursive Expand/Collapse folder tree
 function renderNoteTree() {
   const el = document.getElementById('noteList');
   el.innerHTML = '';
 
-  // Group notes into root files and folder buckets
-  const rootNotes = [];
-  const folderMap = {}; // { [folderName]: [note1, note2] }
+  const root = buildNoteTree(notes);
 
-  notes.forEach(n => {
-    const parts = n.name.split('/');
-    if (parts.length > 1) {
-      const folder = parts.slice(0, -1).join('/');
-      if (!folderMap[folder]) folderMap[folder] = [];
-      folderMap[folder].push(n);
-    } else {
-      rootNotes.push(n);
-    }
+  // Render top-level folders sorted alphabetically
+  Object.keys(root.folders).sort().forEach(k => {
+    renderFolderNode(root.folders[k], el, 0);
   });
 
-  // Render Folders
-  Object.keys(folderMap).sort().forEach(folderName => {
-    const isExpanded = expandedFolders.has(folderName);
-    const childNotes = folderMap[folderName];
-
-    const folderContainer = document.createElement('div');
-    folderContainer.className = 'space-y-0.5';
-
-    // Folder Row Header
-    const folderRow = document.createElement('div');
-    folderRow.className = 'group flex items-center justify-between px-2 py-1.5 rounded hover:bg-[#15151a] cursor-pointer text-[#8e8e99] hover:text-[#dcdce5] transition';
-    folderRow.innerHTML = `
-      <div class="flex items-center space-x-1.5 truncate flex-1" onclick="toggleFolder('${folderName}')">
-        <span class="text-[10px] w-3 text-center">${isExpanded ? '▼' : '▶'}</span>
-        <svg class="w-3.5 h-3.5 text-[#7c6cf0]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-        </svg>
-        <span class="truncate font-medium">${escapeHtml(folderName)}</span>
-        <span class="text-[10px] text-[#555562]">(${childNotes.length})</span>
-      </div>
-      <button onclick="createNewNoteInFolder('${folderName}')" title="New Note in ${folderName}" class="opacity-0 group-hover:opacity-100 text-[#8e8e99] hover:text-[#ededf0] p-0.5 rounded hover:bg-[#1f1f26] transition">
-        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
-      </button>
-    `;
-    folderContainer.appendChild(folderRow);
-
-    // Child Files List
-    if (isExpanded) {
-      const childList = document.createElement('ul');
-      childList.className = 'pl-4 space-y-0.5 border-l border-[#1c1c24] ml-3';
-      childNotes.forEach(n => {
-        childList.appendChild(createNoteListItem(n));
-      });
-      folderContainer.appendChild(childList);
-    }
-
-    el.appendChild(folderContainer);
-  });
-
-  // Render Root Notes
-  rootNotes.forEach(n => {
+  // Render root notes sorted alphabetically
+  root.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(n => {
     el.appendChild(createNoteListItem(n));
   });
+}
+
+function renderFolderNode(node, container, depth = 0) {
+  const isExpanded = expandedFolders.has(node.path);
+  const totalNotes = countTotalNotes(node);
+
+  const folderContainer = document.createElement('div');
+  folderContainer.className = 'space-y-0.5';
+
+  // Folder Row Header
+  const folderRow = document.createElement('div');
+  folderRow.className = 'group flex items-center justify-between px-2 py-1.5 rounded hover:bg-[#15151a] cursor-pointer text-[#8e8e99] hover:text-[#dcdce5] transition';
+  folderRow.innerHTML = `
+    <div class="flex items-center space-x-1.5 truncate flex-1" onclick="toggleFolder('${escapeJsString(node.path)}')">
+      <span class="text-[10px] w-3 text-center text-[#60606e]">${isExpanded ? '▼' : '▶'}</span>
+      <svg class="w-3.5 h-3.5 text-[#7c6cf0] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+      </svg>
+      <span class="truncate font-medium text-xs">${escapeHtml(node.name)}</span>
+      <span class="text-[10px] text-[#555562]">(${totalNotes})</span>
+    </div>
+    <button onclick="createNewNoteInFolder('${escapeJsString(node.path)}')" title="New Note in ${escapeHtml(node.path)}" class="opacity-0 group-hover:opacity-100 text-[#8e8e99] hover:text-[#ededf0] p-0.5 rounded hover:bg-[#1f1f26] transition">
+      <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+    </button>
+  `;
+  folderContainer.appendChild(folderRow);
+
+  // Child Items (Subfolders & Notes)
+  if (isExpanded) {
+    const childList = document.createElement('div');
+    childList.className = 'pl-3.5 space-y-0.5 border-l border-[#1c1c24] ml-3';
+
+    // Subfolders first, sorted alphabetically
+    Object.keys(node.folders).sort().forEach(k => {
+      renderFolderNode(node.folders[k], childList, depth + 1);
+    });
+
+    // Direct notes in this folder, sorted alphabetically
+    node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(n => {
+      childList.appendChild(createNoteListItem(n));
+    });
+
+    folderContainer.appendChild(childList);
+  }
+
+  container.appendChild(folderContainer);
 }
 
 function createNoteListItem(n) {
@@ -159,27 +205,27 @@ function createNoteListItem(n) {
   const isActive = activeNote && activeNote.name === n.name;
   const displayName = n.name.split('/').pop();
 
-  li.className = `group flex items-center justify-between rounded px-2 py-1.5 transition ${
+  li.className = `group flex items-center justify-between rounded px-2 py-1.5 transition text-xs ${
     isActive ? 'bg-[#1e1e26] text-[#ededf0] font-medium' : 'text-[#9c9ca8] hover:bg-[#15151a] hover:text-[#dcdce5]'
   }`;
 
   li.innerHTML = `
-    <button onclick="selectNote('${n.name}')" class="truncate flex-1 text-left flex items-center gap-1.5">
-      <svg class="w-3 h-3 text-[#555562]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <button onclick="selectNote('${escapeJsString(n.name)}')" class="truncate flex-1 text-left flex items-center gap-1.5">
+      <svg class="w-3 h-3 text-[#555562] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
       </svg>
       <span class="truncate">${escapeHtml(displayName)}.md</span>
     </button>
-    <button onclick="deleteNote('${n.name}')" title="Delete note" class="opacity-0 group-hover:opacity-100 text-[#60606b] hover:text-[#f43f5e] text-xs px-1 transition">✕</button>
+    <button onclick="deleteNote('${escapeJsString(n.name)}')" title="Delete note" class="opacity-0 group-hover:opacity-100 text-[#60606b] hover:text-[#f43f5e] text-xs px-1 transition">✕</button>
   `;
   return li;
 }
 
-function toggleFolder(folderName) {
-  if (expandedFolders.has(folderName)) {
-    expandedFolders.delete(folderName);
+function toggleFolder(folderPath) {
+  if (expandedFolders.has(folderPath)) {
+    expandedFolders.delete(folderPath);
   } else {
-    expandedFolders.add(folderName);
+    expandedFolders.add(folderPath);
   }
   renderNoteTree();
 }
@@ -191,6 +237,13 @@ function selectNote(name) {
   activeNote = found;
   cellOutputs = {}; // Reset output cache on note switch
   document.getElementById('activeNoteTitle').innerText = `${found.name}.md`;
+
+  // Auto-expand all parent folders of the selected note
+  const parts = found.name.split('/');
+  for (let i = 1; i < parts.length; i++) {
+    expandedFolders.add(parts.slice(0, i).join('/'));
+  }
+
   renderNoteTree();
   renderFlowDocument(found);
   if (isRawMode) {
@@ -223,8 +276,13 @@ async function saveNewNoteWithName(name) {
     body: JSON.stringify({ name: cleanName, content: defaultContent })
   });
   const created = await res.json();
-  const folder = cleanName.split('/').slice(0, -1).join('/');
-  if (folder) expandedFolders.add(folder);
+
+  // Auto-expand all parent folders
+  const parts = cleanName.split('/');
+  for (let i = 1; i < parts.length; i++) {
+    expandedFolders.add(parts.slice(0, i).join('/'));
+  }
+
   await loadNotes();
   selectNote(created.name);
 }
