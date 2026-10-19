@@ -1,14 +1,14 @@
 # Payment Service Architecture
-Bagian dari ekosistem [[checkout-runbook]]. Menggunakan koneksi database dan message broker yang sama.
+Part of the [[checkout-runbook]] ecosystem. Shares the same database connection and message broker.
 
-## Cek Health System via Shell
+## System Health Check via Shell
 ```sh @assert="contains:OK"
 echo "Payment Gateway Ping: OK ($(date +%H:%M:%S))"
 ```
 
-## Kalkulasi Fee via JavaScript
+## Calculate Fee via JavaScript
 ```js @assert="contains:Fee"
 const amount = 250000;
 const fee = amount * 0.015;
-console.log(`Total Fee: Rp ${fee}`);
+console.log(`Total Fee: $${fee}`);
 ```

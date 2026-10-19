@@ -1,7 +1,7 @@
 # Incident Playbook
-Panduan mitigasi jika [[payment-service]] atau [[checkout-runbook]] mengalami peningkatan latensi.
+Mitigation guide when [[payment-service]] or [[checkout-runbook]] experiences increased latency.
 
-## Cek Koneksi Redis
+## Check Redis Connection
 ```redis @conn=redis_main @assert="contains:PONG"
 PING
 ```
