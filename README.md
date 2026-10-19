@@ -2,6 +2,13 @@
 
 **RunMD** is an *Executable Markdown Notebook & Knowledge Graph* (combining Jupyter Notebook + Postman/Database Client + Obsidian Graph + AI Agent Test Engine) built with **Golang** (Single Binary Architecture).
 
+## 📸 Screenshots
+
+<p align="center">
+  <img src="docs/document-view.png" width="49%" />
+  <img src="docs/graph-view.png" width="49%" />
+</p>
+
 ---
 
 ## 🌟 Key Features
@@ -52,7 +59,9 @@
 
 ### 1. Build & Run
 ```bash
-cd ~/projects/runmd
+# Clone the repository
+git clone https://github.com/mrbagir/runmd.git
+cd runmd
 
 # Build binary
 go build -o runmd .
@@ -66,17 +75,7 @@ Open your browser at:
 
 ---
 
-### 2. Development Mode (Live Reload with Fresh)
-Configured for live-reload with [gravityblast/fresh](https://github.com/gravityblast/fresh). Whenever Go files or frontend assets in `static/` change, the server automatically rebuilds and restarts:
-```bash
-fresh
-# Or if ~/go/bin is not yet in your system PATH:
-~/go/bin/fresh
-```
-
----
-
-### 3. CLI Flags
+### 2. CLI Flags
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-port` | `8080` | HTTP server port |
