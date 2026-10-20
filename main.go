@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -74,9 +75,12 @@ type GraphData struct {
 }
 
 type GraphNode struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
-	Group string `json:"group"` // "note" or "connection"
+	ID         string `json:"id"`
+	Label      string `json:"label"`
+	Path       string `json:"path,omitempty"`
+	Group      string `json:"group"` // "note", "connection", "unresolved"
+	LinkCount  int    `json:"link_count"`
+	Unresolved bool   `json:"unresolved,omitempty"`
 }
 
 type GraphEdge struct {
@@ -433,9 +437,94 @@ func (s *AppState) registerRoutes(mux *http.ServeMux) {
 	if err != nil {
 		log.Fatalf("failed to create sub filesystem: %v", err)
 	}
-	mux.Handle("/", http.FileServer(http.FS(subFS)))
+	fileServer := http.FileServer(http.FS(subFS))
 
-	// 1. Notes CRUD
+	// Fallback helper to serve index.html for SPA routes (e.g. /n/...)
+	serveIndex := func(w http.ResponseWriter, r *http.Request) {
+		indexData, readErr := subFS.Open("index.html")
+		if readErr != nil {
+			http.Error(w, "index.html not found", http.StatusNotFound)
+			return
+		}
+		defer indexData.Close()
+		stat, _ := indexData.Stat()
+		http.ServeContent(w, r, "index.html", stat.ModTime(), indexData.(io.ReadSeeker))
+	}
+
+	// SPA Route for Note URLs: /n/...
+	mux.HandleFunc("/n/", func(w http.ResponseWriter, r *http.Request) {
+		serveIndex(w, r)
+	})
+
+	// Static & Root Handler
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// If requesting root or explicit index
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+			serveIndex(w, r)
+			return
+		}
+		// Try to serve static file from subFS
+		cleanPath := strings.TrimPrefix(filepath.Clean(r.URL.Path), "/")
+		if f, err := subFS.Open(cleanPath); err == nil {
+			_ = f.Close()
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		// Fallback to index.html for any client navigation
+		serveIndex(w, r)
+	})
+
+	// 1. Single Note Content Endpoint (On-demand Lazy Load)
+	mux.HandleFunc("/api/notes/content", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		name := r.URL.Query().Get("name")
+		if name == "" {
+			http.Error(w, "name query param required", http.StatusBadRequest)
+			return
+		}
+
+		clean := strings.TrimPrefix(filepath.ToSlash(name), "/")
+		clean = strings.TrimSuffix(clean, ".md")
+
+		// Try direct file path
+		candidate := filepath.Join(s.notesDir, clean+".md")
+		raw, err := os.ReadFile(candidate)
+		foundPath := clean
+
+		// Fallback: walk directory to find matching base or relative path
+		if err != nil {
+			_ = filepath.WalkDir(s.notesDir, func(path string, d fs.DirEntry, walkErr error) error {
+				if walkErr != nil || d == nil || d.IsDir() {
+					return nil
+				}
+				if strings.HasSuffix(d.Name(), ".md") {
+					rel, relErr := filepath.Rel(s.notesDir, path)
+					if relErr == nil {
+						relSlash := strings.TrimSuffix(filepath.ToSlash(rel), ".md")
+						base := strings.TrimSuffix(d.Name(), ".md")
+						if relSlash == clean || base == filepath.Base(clean) {
+							raw, err = os.ReadFile(path)
+							foundPath = relSlash
+							return fs.SkipAll
+						}
+					}
+				}
+				return nil
+			})
+		}
+
+		if err != nil {
+			http.Error(w, fmt.Sprintf("note '%s' not found", name), http.StatusNotFound)
+			return
+		}
+
+		writeJSON(w, ParseNote(foundPath, string(raw)))
+	})
+
+	// 2. Notes CRUD (List, Create/Update, Delete)
 	mux.HandleFunc("/api/notes", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			var notes []Note
@@ -489,6 +578,58 @@ func (s *AppState) registerRoutes(mux *http.ServeMux) {
 			writeJSON(w, map[string]string{"status": "deleted", "name": rel})
 			return
 		}
+	})
+
+	// 2. Note Rename Endpoint
+	mux.HandleFunc("/api/notes/rename", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost && r.Method != http.MethodPut {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			OldName string `json:"old_name"`
+			NewName string `json:"new_name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(req.OldName) == "" || strings.TrimSpace(req.NewName) == "" {
+			http.Error(w, "old_name and new_name are required", http.StatusBadRequest)
+			return
+		}
+
+		oldRel := strings.TrimPrefix(filepath.Clean("/"+req.OldName), "/")
+		oldRel = strings.TrimSuffix(oldRel, ".md") + ".md"
+		oldFullPath := filepath.Join(s.notesDir, oldRel)
+
+		newRel := strings.TrimPrefix(filepath.Clean("/"+req.NewName), "/")
+		newRel = strings.TrimSuffix(newRel, ".md") + ".md"
+		newFullPath := filepath.Join(s.notesDir, newRel)
+
+		if _, err := os.Stat(oldFullPath); os.IsNotExist(err) {
+			http.Error(w, "source note not found", http.StatusNotFound)
+			return
+		}
+
+		if err := os.MkdirAll(filepath.Dir(newFullPath), 0755); err != nil {
+			http.Error(w, "failed to create destination directory: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err := os.Rename(oldFullPath, newFullPath); err != nil {
+			http.Error(w, "failed to rename note: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		content, _ := os.ReadFile(newFullPath)
+		cleanNew := strings.TrimSuffix(filepath.ToSlash(newRel), ".md")
+		writeJSON(w, map[string]interface{}{
+			"status":   "renamed",
+			"old_name": strings.TrimSuffix(filepath.ToSlash(oldRel), ".md"),
+			"new_name": cleanNew,
+			"note":     ParseNote(cleanNew, string(content)),
+		})
 	})
 
 	// 2. Connections Sidebar CRUD
@@ -632,20 +773,30 @@ func (s *AppState) RunFullNoteTest(noteName string) (map[string]any, error) {
 func (s *AppState) BuildGraph() GraphData {
 	nodeMap := make(map[string]GraphNode)
 	var edges []GraphEdge
+	existingNotes := make(map[string]string)
 
 	// Add all connection aliases as nodes
 	s.mu.RLock()
-	for alias, c := range s.connections {
+	for alias := range s.connections {
 		id := "conn:" + alias
 		nodeMap[id] = GraphNode{
-			ID:    id,
-			Label: fmt.Sprintf("@%s (%s)", alias, c.Type),
-			Group: "connection",
+			ID:        id,
+			Label:     alias,
+			Group:     "connection",
+			LinkCount: 0,
 		}
 	}
 	s.mu.RUnlock()
 
-	// Add notes recursively
+	// 1. Scan all existing notes
+	type noteScan struct {
+		Name      string
+		CleanBase string
+		Links     []string
+		UsedConns []string
+	}
+	var scanned []noteScan
+
 	_ = filepath.WalkDir(s.notesDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d == nil || d.IsDir() {
 			return nil
@@ -661,28 +812,80 @@ func (s *AppState) BuildGraph() GraphData {
 				return nil
 			}
 			n := ParseNote(relClean, string(raw))
-			nodeMap[n.Name] = GraphNode{ID: n.Name, Label: n.Name + ".md", Group: "note"}
+			existingNotes[n.Name] = n.Name
+			existingNotes[filepath.Base(n.Name)] = n.Name
 
-			for _, target := range n.Links {
-				if _, exists := nodeMap[target]; !exists {
-					nodeMap[target] = GraphNode{ID: target, Label: target + ".md", Group: "note"}
-				}
-				edges = append(edges, GraphEdge{From: n.Name, To: target, Label: "wikilink"})
-			}
+			scanned = append(scanned, noteScan{
+				Name:      n.Name,
+				CleanBase: filepath.Base(n.Name),
+				Links:     n.Links,
+				UsedConns: n.UsedConns,
+			})
 
-			for _, connAlias := range n.UsedConns {
-				connID := "conn:" + connAlias
-				if _, exists := nodeMap[connID]; !exists {
-					nodeMap[connID] = GraphNode{ID: connID, Label: "@" + connAlias, Group: "connection"}
-				}
-				edges = append(edges, GraphEdge{From: n.Name, To: connID, Label: "uses"})
+			nodeMap[n.Name] = GraphNode{
+				ID:         n.Name,
+				Label:      filepath.Base(n.Name),
+				Path:       n.Name,
+				Group:      "note",
+				LinkCount:  0,
+				Unresolved: false,
 			}
 		}
 		return nil
 	})
 
+	// 2. Link resolution and degree count
+	linkCounts := make(map[string]int)
+
+	for _, n := range scanned {
+		for _, target := range n.Links {
+			cleanTarget := strings.TrimSuffix(filepath.ToSlash(target), ".md")
+			resolvedID := cleanTarget
+
+			// Resolve target note ID (matches full path or filename)
+			if actualID, exists := existingNotes[cleanTarget]; exists {
+				resolvedID = actualID
+			} else if actualID, exists := existingNotes[filepath.Base(cleanTarget)]; exists {
+				resolvedID = actualID
+			} else {
+				// Unresolved note node (standard Obsidian unresolved note)
+				if _, exists := nodeMap[cleanTarget]; !exists {
+					nodeMap[cleanTarget] = GraphNode{
+						ID:         cleanTarget,
+						Label:      filepath.Base(cleanTarget),
+						Group:      "unresolved",
+						LinkCount:  0,
+						Unresolved: true,
+					}
+				}
+				resolvedID = cleanTarget
+			}
+
+			edges = append(edges, GraphEdge{From: n.Name, To: resolvedID, Label: "wikilink"})
+			linkCounts[n.Name]++
+			linkCounts[resolvedID]++
+		}
+
+		for _, connAlias := range n.UsedConns {
+			connID := "conn:" + connAlias
+			if _, exists := nodeMap[connID]; !exists {
+				nodeMap[connID] = GraphNode{
+					ID:        connID,
+					Label:     connAlias,
+					Group:     "connection",
+					LinkCount: 0,
+				}
+			}
+			edges = append(edges, GraphEdge{From: n.Name, To: connID, Label: "uses"})
+			linkCounts[n.Name]++
+			linkCounts[connID]++
+		}
+	}
+
+	// 3. Assemble nodes with computed link degree
 	var nodes []GraphNode
-	for _, v := range nodeMap {
+	for id, v := range nodeMap {
+		v.LinkCount = linkCounts[id]
 		nodes = append(nodes, v)
 	}
 

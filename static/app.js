@@ -3,8 +3,6 @@ let connections = {};
 let activeNote = null;
 let isRawMode = false;
 let cellOutputs = {}; // Cache cell outputs { [cellIdx]: result }
-let expandedFolders = loadExpandedFolders();
-
 function loadExpandedFolders() {
   try {
     const saved = localStorage.getItem('runmd_expanded_folders');
@@ -13,6 +11,33 @@ function loadExpandedFolders() {
     console.error('Failed to parse expandedFolders from localStorage', e);
   }
   return null; // Signals first visit: will dynamically auto-expand all folders
+}
+
+let isSidebarCollapsed = localStorage.getItem('runmd_sidebar_collapsed') === 'true';
+let expandedFolders = loadExpandedFolders();
+
+function saveSidebarState() {
+  localStorage.setItem('runmd_sidebar_collapsed', isSidebarCollapsed ? 'true' : 'false');
+}
+
+function applySidebarState() {
+  const sidebar = document.getElementById('sidebar');
+  const btnOpen = document.getElementById('btnOpenSidebar');
+  if (!sidebar) return;
+
+  if (isSidebarCollapsed) {
+    sidebar.classList.add('hidden');
+    if (btnOpen) btnOpen.classList.remove('hidden');
+  } else {
+    sidebar.classList.remove('hidden');
+    if (btnOpen) btnOpen.classList.add('hidden');
+  }
+}
+
+function toggleSidebar() {
+  isSidebarCollapsed = !isSidebarCollapsed;
+  saveSidebarState();
+  applySidebarState();
 }
 
 function saveExpandedFolders() {
@@ -25,11 +50,61 @@ function saveExpandedFolders() {
   }
 }
 
+function getNoteNameFromUrl() {
+  const path = window.location.pathname;
+  if (path.startsWith('/n/')) {
+    const raw = path.slice(3).replace(/\.md$/, '').trim();
+    return decodeURIComponent(raw);
+  }
+  return null;
+}
+
+function updateUrlForNote(noteName) {
+  const targetPath = `/n/${encodeURI(noteName)}`;
+  if (window.location.pathname !== targetPath) {
+    history.pushState({ note: noteName }, '', targetPath);
+  }
+}
+
 async function init() {
+  applySidebarState();
   initResizer();
   await Promise.all([loadConnections(), loadNotes()]);
-  if (notes.length > 0) {
-    selectNote(notes[0].name);
+
+  // Keyboard shortcuts
+  window.addEventListener('keydown', (e) => {
+    const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+
+    // 1. Toggle View Source: Ctrl/Cmd + E (Obsidian standard, no Chrome collision)
+    if (isCmdOrCtrl && !e.altKey && !e.shiftKey && (e.key === 'e' || e.key === 'E')) {
+      e.preventDefault();
+      toggleRawSource();
+      return;
+    }
+
+    // 2. Toggle Sidebar: Ctrl/Cmd + B or Ctrl/Cmd + \
+    if (isCmdOrCtrl && !e.altKey && !e.shiftKey && (e.key === 'b' || e.key === 'B' || e.key === '\\')) {
+      e.preventDefault();
+      toggleSidebar();
+      return;
+    }
+  });
+
+  // Handle browser Back / Forward buttons
+  window.addEventListener('popstate', (e) => {
+    const noteFromUrl = getNoteNameFromUrl();
+    if (noteFromUrl) {
+      selectNote(noteFromUrl, false);
+    } else if (notes.length > 0) {
+      selectNote(notes[0].name, false);
+    }
+  });
+
+  const initialNote = getNoteNameFromUrl();
+  if (initialNote) {
+    selectNote(initialNote, false);
+  } else if (notes.length > 0) {
+    selectNote(notes[0].name, true);
   }
 }
 
@@ -249,7 +324,12 @@ function createNoteListItem(n) {
       </svg>
       <span class="truncate">${escapeHtml(displayName)}.md</span>
     </button>
-    <button onclick="deleteNote('${escapeJsString(n.name)}')" title="Delete note" class="opacity-0 group-hover:opacity-100 text-[#60606b] hover:text-[#f43f5e] text-xs px-1 transition">✕</button>
+    <button onclick="openEditNoteMenu('${escapeJsString(n.name)}', event)" title="Edit note" class="edit-note-btn opacity-0 group-hover:opacity-100 text-[#737380] hover:text-[#ededf0] p-1 rounded hover:bg-[#22222a] transition flex items-center justify-center">
+      <svg class="w-3.5 h-3.5 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+      </svg>
+    </button>
   `;
   return li;
 }
@@ -265,13 +345,20 @@ function toggleFolder(folderPath) {
   renderNoteTree();
 }
 
-function selectNote(name) {
+async function selectNote(name, pushToHistory = true) {
   const cleanName = name.replace(/\.md$/, '').replace(/^\//, '');
   const found = notes.find(n => n.name === cleanName || n.name.endsWith('/' + cleanName) || cleanName.endsWith('/' + n.name));
   if (!found) return;
+
   activeNote = found;
   cellOutputs = {}; // Reset output cache on note switch
   document.getElementById('activeNoteTitle').innerText = `${found.name}.md`;
+  const fileNameOnly = found.name.split('/').pop();
+  document.title = `${fileNameOnly}.md - RunMD`;
+
+  if (pushToHistory) {
+    updateUrlForNote(found.name);
+  }
 
   // Auto-expand all parent folders of the selected note
   if (!expandedFolders) expandedFolders = new Set();
@@ -287,9 +374,23 @@ function selectNote(name) {
   if (changed) saveExpandedFolders();
 
   renderNoteTree();
+
+  // If content is not yet fetched or on-demand fetch is needed
+  if (found.content === undefined || found.code_blocks === undefined) {
+    try {
+      const res = await fetch(`/api/notes/content?name=${encodeURIComponent(found.name)}`);
+      if (res.ok) {
+        const full = await res.json();
+        Object.assign(found, full);
+      }
+    } catch (e) {
+      console.error('Failed to fetch note content', e);
+    }
+  }
+
   renderFlowDocument(found);
   if (isRawMode) {
-    document.getElementById('rawSourceTextarea').value = found.content;
+    document.getElementById('rawSourceTextarea').value = found.content || '';
   }
 }
 
@@ -331,9 +432,113 @@ async function saveNewNoteWithName(name) {
   selectNote(created.name);
 }
 
+let activeEditNoteMenu = null;
+
+function closeEditNoteMenu() {
+  if (activeEditNoteMenu) {
+    activeEditNoteMenu.remove();
+    activeEditNoteMenu = null;
+  }
+}
+
+document.addEventListener('click', (e) => {
+  if (activeEditNoteMenu && !e.target.closest('.edit-note-menu') && !e.target.closest('.edit-note-btn')) {
+    closeEditNoteMenu();
+  }
+});
+
+function openEditNoteMenu(name, event) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  closeEditNoteMenu();
+
+  const btn = event ? event.currentTarget : null;
+  if (!btn) return;
+
+  const rect = btn.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.className = 'edit-note-menu fixed z-50 bg-[#141419] border border-[#262633] rounded-md shadow-2xl py-1 text-xs w-36 text-[#c9c9d4] select-none';
+
+  const top = rect.bottom + 4;
+  const left = Math.max(10, Math.min(rect.right - 144, window.innerWidth - 154));
+  menu.style.top = `${top}px`;
+  menu.style.left = `${left}px`;
+
+  menu.innerHTML = `
+    <button onclick="triggerRenameNote('${escapeJsString(name)}')" class="w-full text-left px-3 py-1.5 hover:bg-[#20202b] hover:text-[#ededf0] flex items-center gap-2 transition cursor-pointer">
+      <svg class="w-3.5 h-3.5 text-[#8e8e99]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+      </svg>
+      <span>Rename note</span>
+    </button>
+    <div class="h-px bg-[#202028] my-1"></div>
+    <button onclick="triggerDeleteNote('${escapeJsString(name)}')" class="w-full text-left px-3 py-1.5 hover:bg-[#2b181e] text-[#f43f5e] hover:text-[#fb7185] flex items-center gap-2 transition cursor-pointer">
+      <svg class="w-3.5 h-3.5 text-[#f43f5e]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      </svg>
+      <span>Delete note</span>
+    </button>
+  `;
+
+  document.body.appendChild(menu);
+  activeEditNoteMenu = menu;
+}
+
+async function triggerRenameNote(oldName) {
+  closeEditNoteMenu();
+  const newName = prompt(`Rename note '${oldName}.md' to:`, oldName);
+  if (!newName) return;
+  const cleanNewName = newName.replace(/\.md$/, '').trim().replace(/^\//, '');
+  if (!cleanNewName || cleanNewName === oldName) return;
+
+  try {
+    const res = await fetch('/api/notes/rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ old_name: oldName, new_name: cleanNewName })
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      alert(`Failed to rename note: ${errText}`);
+      return;
+    }
+    const data = await res.json();
+
+    // Auto-expand parent folders of new note
+    if (!expandedFolders) expandedFolders = new Set();
+    const parts = cleanNewName.split('/');
+    for (let i = 1; i < parts.length; i++) {
+      expandedFolders.add(parts.slice(0, i).join('/'));
+    }
+    saveExpandedFolders();
+
+    const wasActive = activeNote && (activeNote.name === oldName);
+    rawGraphData = null; // Invalidate cached graph
+    await loadNotes();
+
+    if (wasActive) {
+      selectNote(cleanNewName, true);
+    } else {
+      renderNoteTree();
+    }
+  } catch (err) {
+    alert(`Error renaming note: ${err.message}`);
+  }
+}
+
+async function triggerDeleteNote(name) {
+  closeEditNoteMenu();
+  await deleteNote(name);
+}
+
 async function deleteNote(name) {
   if (!confirm(`Delete note '${name}.md'?`)) return;
   await fetch(`/api/notes?name=${encodeURIComponent(name)}`, { method: 'DELETE' });
+  rawGraphData = null; // Invalidate cached graph
   await loadNotes();
   if (notes.length > 0) {
     selectNote(notes[0].name);
@@ -341,6 +546,7 @@ async function deleteNote(name) {
     activeNote = null;
     document.getElementById('activeNoteTitle').innerText = '';
     document.getElementById('documentFlow').innerHTML = '';
+    document.title = 'RunMD — Executable Markdown';
   }
 }
 
@@ -907,41 +1113,154 @@ function switchView(view) {
   }
 }
 
+// --- OBSIDIAN KNOWLEDGE GRAPH ENGINE ---
+let graphNetwork = null;
+let rawGraphData = null;
+
+function resetGraphView() {
+  if (graphNetwork) {
+    graphNetwork.fit({ animation: { duration: 600, easingFunction: 'easeInOutQuad' } });
+  }
+}
+
 async function renderGraph() {
-  const res = await fetch('/api/graph');
-  const data = await res.json();
+  if (!rawGraphData) {
+    const res = await fetch('/api/graph');
+    rawGraphData = await res.json();
+  }
+  filterAndRenderGraph();
+}
 
-  const nodes = new vis.DataSet(data.nodes.map(n => ({
-    id: n.id,
-    label: n.label,
-    shape: n.group === 'note' ? 'dot' : 'box',
-    size: n.group === 'note' ? 18 : 12,
-    color: n.group === 'note' ?
-      { background: '#7c6cf0', border: '#6353d8', highlight: { background: '#9d8df7', border: '#7c6cf0' } } :
-      { background: '#25252d', border: '#383845', highlight: { background: '#353540', border: '#4d4d5e' } },
-    font: { color: '#ededf0', size: 11, face: '-apple-system, BlinkMacSystemFont, sans-serif' }
-  })));
+function filterAndRenderGraph() {
+  if (!rawGraphData) return;
 
-  const edges = new vis.DataSet(data.edges.map(e => ({
+  const showConn = true;
+  const showArrows = true;
+  const showUnresolved = true;
+
+  // Filter nodes
+  const filteredNodes = rawGraphData.nodes.filter(n => {
+    if (!showConn && n.group === 'connection') return false;
+    if (!showUnresolved && n.group === 'unresolved') return false;
+    return true;
+  });
+
+  const nodeSet = new Set(filteredNodes.map(n => n.id));
+
+  // Filter edges connected only to visible nodes
+  const filteredEdges = rawGraphData.edges.filter(e => {
+    return nodeSet.has(e.from) && nodeSet.has(e.to);
+  });
+
+  // Authentic Obsidian Node Styling:
+  // - Node size scales dynamically with link count (degree centrality): 10px base + 3px per link (capped at 30px)
+  // - Color palette matching Obsidian Dark theme: Note (#7c6cf0 / #8b7af5), Connection (#10b981), Unresolved (#474754)
+  const nodes = new vis.DataSet(filteredNodes.map(n => {
+    const isConn = n.group === 'connection';
+    const isUnresolved = n.group === 'unresolved';
+    const count = n.link_count || 1;
+    const nodeSize = isConn ? 9 : Math.min(10 + count * 2.5, 26);
+
+    let bgColor = '#7c6cf0';
+    let borderColor = '#9385f5';
+    let highlightBg = '#9d8ef8';
+    let highlightBorder = '#ffffff';
+
+    if (isConn) {
+      bgColor = '#10b981';
+      borderColor = '#34d399';
+      highlightBg = '#34d399';
+      highlightBorder = '#ffffff';
+    } else if (isUnresolved) {
+      bgColor = '#3f3f4c';
+      borderColor = '#555566';
+      highlightBg = '#5a5a6e';
+      highlightBorder = '#808096';
+    }
+
+    return {
+      id: n.id,
+      label: n.label,
+      shape: 'dot',
+      size: nodeSize,
+      color: {
+        background: bgColor,
+        border: borderColor,
+        highlight: { background: highlightBg, border: highlightBorder },
+        hover: { background: highlightBg, border: highlightBorder }
+      },
+      font: {
+        color: '#c9c9d4',
+        size: 11,
+        face: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        strokeWidth: 2,
+        strokeColor: '#0d0d10'
+      },
+      borderWidth: 1.5,
+      borderWidthSelected: 2.5,
+      shadow: { enabled: true, color: 'rgba(0,0,0,0.4)', size: 6, x: 0, y: 2 }
+    };
+  }));
+
+  // Obsidian Edge Styling: thin subtle lines (#2b2b36)
+  const edges = new vis.DataSet(filteredEdges.map((e, idx) => ({
+    id: `edge-${idx}`,
     from: e.from,
     to: e.to,
-    label: e.label,
-    arrows: 'to',
-    color: { color: e.label === 'wikilink' ? '#3e3e4a' : '#5a4ec7' },
-    font: { color: '#737380', size: 9, align: 'middle' },
+    arrows: showArrows ? { to: { enabled: true, scaleFactor: 0.4 } } : false,
+    color: {
+      color: e.label === 'uses' ? 'rgba(16, 185, 129, 0.35)' : 'rgba(255, 255, 255, 0.15)',
+      highlight: '#7c6cf0',
+      hover: '#a094f7'
+    },
+    width: 1.2,
+    selectionWidth: 2,
+    hoverWidth: 1.8,
+    smooth: { enabled: true, type: 'continuous', roundness: 0.15 },
     dashes: e.label === 'uses'
   })));
 
   const container = document.getElementById('graphContainer');
-  const network = new vis.Network(container, { nodes, edges }, {
-    physics: {
-      stabilization: false,
-      barnesHut: { springLength: 130, springConstant: 0.04, damping: 0.09 }
-    },
-    interaction: { hover: true, tooltipDelay: 200 }
-  });
+  const repel = 2500;
+  const linkDist = 110;
+  const gravity = 0.05;
 
-  network.on('click', params => {
+  const options = {
+    nodes: {
+      scaling: { min: 8, max: 28 }
+    },
+    edges: {
+      arrows: { to: { enabled: showArrows } }
+    },
+    physics: {
+      enabled: true,
+      stabilization: { iterations: 150, fit: true },
+      barnesHut: {
+        gravitationalConstant: -repel,
+        springLength: linkDist,
+        springConstant: 0.04,
+        centralGravity: gravity,
+        damping: 0.09
+      }
+    },
+    interaction: {
+      hover: true,
+      hoverConnectedEdges: true,
+      selectConnectedEdges: true,
+      tooltipDelay: 150,
+      zoomView: true,
+      dragView: true
+    }
+  };
+
+  if (graphNetwork) {
+    graphNetwork.destroy();
+  }
+
+  graphNetwork = new vis.Network(container, { nodes, edges }, options);
+
+  // Click on note node -> Jump directly to note view
+  graphNetwork.on('click', params => {
     if (params.nodes.length > 0) {
       const nodeId = params.nodes[0];
       if (!nodeId.startsWith('conn:')) {
@@ -949,6 +1268,15 @@ async function renderGraph() {
         selectNote(nodeId);
       }
     }
+  });
+
+  // Obsidian Hover Focus Highlight (dim unconnected nodes on hover)
+  graphNetwork.on('hoverNode', params => {
+    container.style.cursor = 'pointer';
+  });
+
+  graphNetwork.on('blurNode', () => {
+    container.style.cursor = 'default';
   });
 }
 

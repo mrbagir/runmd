@@ -12,19 +12,25 @@
 <body class="h-screen flex overflow-hidden select-none">
 
   <!-- SIDEBAR (Obsidian Vault Style) -->
-  <aside class="w-64 bg-[#0f0f11] border-r border-[#222227] flex flex-col justify-between shrink-0">
-    <div class="p-3 overflow-y-auto space-y-5 flex-1">
-      
-      <!-- Minimal Header -->
-      <div class="flex items-center justify-between px-2 pt-1 pb-2 border-b border-[#1f1f24]">
-        <div class="flex items-center space-x-2">
-          <svg class="w-4 h-4 text-[#7c6cf0]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
-          </svg>
-          <span class="text-xs font-semibold tracking-wide text-[#dcdce5]">RunMD Vault</span>
-        </div>
+  <aside id="sidebar" class="w-64 bg-[#0f0f11] border-r border-[#1f1f24] flex flex-col justify-between shrink-0 transition-all duration-200">
+    <!-- Header with identical height (h-11) and border-b as main header -->
+    <div class="h-11 px-3 flex items-center justify-between border-b border-[#1f1f24] shrink-0">
+      <div class="flex items-center space-x-2">
+        <svg class="w-4 h-4 text-[#7c6cf0]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+        </svg>
+        <span class="text-xs font-semibold tracking-wide text-[#dcdce5]">RunMD Vault</span>
       </div>
+      <button id="btnToggleSidebar" onclick="toggleSidebar()" title="Toggle Sidebar (Ctrl/Cmd+B)" class="text-[#8e8e99] hover:text-[#ededf0] p-1 rounded hover:bg-[#1a1a20] transition">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="9" y1="3" x2="9" y2="21"></line>
+        </svg>
+      </button>
+    </div>
+
+    <div class="p-3 overflow-y-auto space-y-5 flex-1">
 
       <!-- Notes File List with Tree & Moved + Button -->
       <div>
@@ -79,7 +85,13 @@
     
     <!-- Ultra-Minimalist Top Header -->
     <header class="h-11 bg-[#101012] border-b border-[#1f1f24] px-4 flex items-center justify-between shrink-0">
-      <div class="flex items-center space-x-1">
+      <div class="flex items-center space-x-1.5">
+        <button id="btnOpenSidebar" onclick="toggleSidebar()" title="Open Sidebar (Ctrl/Cmd+B)" class="hidden mr-1 text-[#8e8e99] hover:text-[#ededf0] p-1 rounded hover:bg-[#1a1a20] transition">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="9" y1="3" x2="9" y2="21"></line>
+          </svg>
+        </button>
         <button id="tabNotebook" onclick="switchView('notebook')" class="px-2.5 py-1 rounded text-xs font-medium bg-[#1e1e24] text-[#f4f4f7] transition flex items-center gap-1.5">
           <svg class="w-3.5 h-3.5 text-[#8e8e99]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -103,7 +115,7 @@
       <div class="flex items-center space-x-3">
         <span id="activeNoteTitle" class="text-xs text-[#a0a0ab] font-mono"></span>
         <div class="h-3.5 w-px bg-[#26262d]"></div>
-        <button id="btnRawToggle" onclick="toggleRawSource()" class="text-[11px] text-[#787885] hover:text-[#c4c4cf] px-2 py-0.5 rounded hover:bg-[#1a1a20] transition">
+        <button id="btnRawToggle" onclick="toggleRawSource()" title="Toggle View Source (Ctrl/Cmd+E)" class="text-[11px] text-[#787885] hover:text-[#c4c4cf] px-2 py-0.5 rounded hover:bg-[#1a1a20] transition">
           View Source
         </button>
       </div>
@@ -136,18 +148,24 @@
     </div>
 
     <!-- CONTENT AREA 2: OBSIDIAN GRAPH VIEW -->
-    <section id="viewGraph" class="hidden flex-1 relative bg-[#0b0b0d]">
-      <div class="absolute top-4 left-4 z-10 bg-[#121216]/90 backdrop-blur border border-[#22222a] p-3 rounded-lg text-xs space-y-1.5 shadow-lg text-[#8e8e99]">
-        <div class="font-semibold text-[#dcdce5] mb-1">Knowledge Graph</div>
-        <div class="flex items-center space-x-2">
-          <span class="w-2.5 h-2.5 rounded-full bg-[#7c6cf0] inline-block"></span>
-          <span>Note (<code class="text-[#b5b5c2]">.md</code>) — click to open</span>
+    <section id="viewGraph" class="hidden flex-1 relative bg-[#0d0d10] overflow-hidden select-none">
+      
+      <!-- Bottom-Left Legend (Minimal Obsidian Badge) -->
+      <div class="absolute bottom-4 left-4 z-10 bg-[#121216]/80 backdrop-blur border border-[#1f1f26] px-3 py-2 rounded-md text-[11px] flex items-center space-x-3 text-[#7f7f8c]">
+        <div class="flex items-center space-x-1.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-[#7c6cf0] inline-block shadow-[0_0_8px_rgba(124,108,240,0.4)]"></span>
+          <span>Note</span>
         </div>
-        <div class="flex items-center space-x-2">
-          <span class="w-2.5 h-2.5 rounded-sm bg-[#3f3f4a] inline-block"></span>
-          <span>Connection (<code class="text-[#b5b5c2]">@conn</code>)</span>
+        <div class="flex items-center space-x-1.5">
+          <span class="w-2 h-2 rounded-full bg-[#393945] inline-block"></span>
+          <span>Unresolved</span>
+        </div>
+        <div class="flex items-center space-x-1.5">
+          <span class="w-2 h-2 rounded-sm bg-[#22c55e] inline-block"></span>
+          <span>Connection</span>
         </div>
       </div>
+
       <div id="graphContainer" class="w-full h-full"></div>
     </section>
 
