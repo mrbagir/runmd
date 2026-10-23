@@ -78,10 +78,41 @@ Open your browser at:
 ### 2. CLI Flags
 | Flag | Default | Description |
 |------|---------|-------------|
+| `-host` | `127.0.0.1` | Bind address. RunMD executes code on your machine, so it listens on localhost only by default; use `0.0.0.0` only on a trusted network |
 | `-port` | `8080` | HTTP server port |
 | `-dir` | `./notes` | Directory path where `.md` notes are stored |
 | `-conn` | `./connections.json` | Path to connections configuration file |
 | `-test` | `""` | Run automated headless tests on a specific note (e.g., `-test checkout-runbook.md`) |
+
+> **Note:** `sql` and `redis` blocks use the real `psql` / `redis-cli` when installed. Otherwise, and always for `rabbitmq` and `mcp`, RunMD returns a clearly marked `[SIMULATED]` response so example notes work with zero setup.
+
+### 3. Assertions
+| Rule | Passes when |
+|------|-------------|
+| `contains:<text>` | output contains the text |
+| `not_contains:<text>` | output does not contain the text |
+| `status == 200` | an HTTP 200 response is detected |
+| `rows > 0` | SQL output reports at least one row |
+| `exit_code == 0` | the block ran without error |
+
+An unrecognised rule **fails** (so typos never pass silently).
+
+### 4. Development
+```bash
+go vet ./... && go test -race ./...
+```
+
+| File | Responsibility |
+|------|----------------|
+| `main.go` | Flags, startup, headless `-test` mode |
+| `handlers.go` | HTTP routes, JSON helpers, same-origin guard, embedded UI |
+| `notes.go` | Note storage (list / find / save / rename / delete) |
+| `parser.go` | Markdown parsing: wikilinks, code blocks, `@meta` |
+| `executor.go` | Block runners and note test reports |
+| `assert.go` | `@assert` evaluation |
+| `graph.go` | Knowledge-graph builder |
+| `state.go` | Connection registry (thread-safe, persisted to JSON) |
+| `models.go` | Shared types |
 
 ---
 
