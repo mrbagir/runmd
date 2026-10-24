@@ -99,8 +99,11 @@ An unrecognised rule **fails** (so typos never pass silently).
 
 ### 4. Development
 ```bash
-go vet ./... && go test -race ./...
+make test   # go vet + go test -race + front-end unit tests (node --test)
+make css    # regenerate static/vendor/tailwind.css after changing classes (needs Node/npm)
 ```
+
+The web UI is plain ES modules served from the embedded `static/` folder: **no bundler, no CDN**. Libraries are vendored in `static/vendor/` (see its README), so it works offline.
 
 | File | Responsibility |
 |------|----------------|
@@ -113,6 +116,10 @@ go vet ./... && go test -race ./...
 | `graph.go` | Knowledge-graph builder |
 | `state.go` | Connection registry (thread-safe, persisted to JSON) |
 | `models.go` | Shared types |
+| `static/js/main.js` | UI entry: view switching, shortcuts, one delegated click handler (`data-action`) |
+| `static/js/notes.js` · `api.js` · `state.js` | Note/connection operations, JSON API client, shared state + event bus |
+| `static/js/markdown.js` | Pure document model: segments, fence metadata, wikilinks (unit-tested) |
+| `static/js/sidebar.js` · `notebook.js` · `rawsource.js` · `graph.js` | Views |
 
 ---
 
