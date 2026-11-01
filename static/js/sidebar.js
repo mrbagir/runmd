@@ -4,6 +4,7 @@
 
 import { bus, setSidebarCollapsed, state, toggleFolder } from './state.js';
 import { createNote, deleteConnection, deleteNote, renameNote, saveConnection } from './notes.js';
+import { showConfirmModal, showPromptModal, showToast } from './modal.js';
 import { baseName, escapeHtml, normalizeNoteName } from './util.js';
 
 const $ = (id) => document.getElementById(id);
@@ -150,24 +151,48 @@ export function onToggleFolder(path) {
 // --- Note creation / rename / delete ---
 
 export async function promptNewNote() {
-  const name = prompt('New note name (e.g. runbook or folder/runbook):', 'new-runbook');
+  const name = await showPromptModal({
+    title: 'New Note',
+    message: 'Masukkan nama file note (misal: runbook atau folder/runbook):',
+    defaultValue: 'new-runbook',
+    placeholder: 'contoh: operations/payment-service',
+    confirmText: 'Buat Note',
+  });
   if (name) await createNote(name);
 }
 
 export async function promptNewNoteInFolder(folder) {
-  const name = prompt(`New note name inside '${folder}/':`, 'new-runbook');
+  const name = await showPromptModal({
+    title: `New Note in '${folder}/'`,
+    message: `Masukkan nama note di dalam folder '${folder}/':`,
+    defaultValue: 'new-runbook',
+    placeholder: 'nama-file',
+    confirmText: 'Buat Note',
+  });
   if (name) await createNote(`${folder}/${name}`);
 }
 
 export async function promptRenameNote(oldName) {
   closeNoteMenu();
-  const newName = prompt(`Rename note '${oldName}.md' to:`, oldName);
+  const newName = await showPromptModal({
+    title: 'Rename Note',
+    message: `Ubah nama atau path untuk note '${oldName}.md':`,
+    defaultValue: oldName,
+    placeholder: oldName,
+    confirmText: 'Ganti Nama',
+  });
   if (newName) await renameNote(oldName, normalizeNoteName(newName));
 }
 
 export async function confirmDeleteNote(name) {
   closeNoteMenu();
-  if (confirm(`Delete note '${name}.md'?`)) await deleteNote(name);
+  const ok = await showConfirmModal({
+    title: 'Hapus Note',
+    message: `Hapus note '${name}.md' dari vault secara permanen?`,
+    confirmText: 'Hapus Note',
+    danger: true,
+  });
+  if (ok) await deleteNote(name);
 }
 
 // --- Per-note edit menu ---
@@ -244,18 +269,35 @@ export function toggleConnectionForm() {
 }
 
 export async function submitConnectionForm() {
-  const alias = $('cAlias').value.trim();
+  let alias = $('cAlias').value.trim();
   const type = $('cType').value;
   const uri = $('cURI').value.trim();
-  if (!alias || !uri) return;
+  if (alias.startsWith('@')) alias = alias.slice(1).trim();
+
+  if (!alias || !uri) {
+    showToast('Alias dan DSN/URI koneksi wajib diisi', 'error');
+    return;
+  }
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(alias)) {
+    showToast('Alias hanya boleh berisi huruf, angka, underscore, dan dash (tanpa spasi)', 'error');
+    return;
+  }
 
   if (await saveConnection({ alias, type, uri })) {
     $('cAlias').value = '';
     $('cURI').value = '';
     toggleConnectionForm();
+    showToast(`Koneksi '@${alias}' berhasil disimpan`, 'success');
   }
 }
 
 export async function confirmDeleteConnection(alias) {
-  if (confirm(`Remove connection alias '${alias}'?`)) await deleteConnection(alias);
+  const ok = await showConfirmModal({
+    title: 'Hapus Koneksi',
+    message: `Hapus alias koneksi '@${alias}' dari sidebar?`,
+    confirmText: 'Hapus',
+    danger: true,
+  });
+  if (ok) await deleteConnection(alias);
 }

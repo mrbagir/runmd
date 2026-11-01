@@ -6,9 +6,14 @@ import { bus, state } from './state.js';
 
 const $ = (id) => document.getElementById(id);
 const SYNC_DELAY_MS = 350;
+const KEY_RAW_WIDTH = 'runmd_raw_editor_width';
 
 export function initRawSource() {
   initResizer();
+  const savedWidth = localStorage.getItem(KEY_RAW_WIDTH);
+  if (savedWidth) {
+    $('rawEditorPanel').style.width = savedWidth;
+  }
   $('rawSourceTextarea').addEventListener('input', onRawInput);
 
   // Switching notes: first save any pending edit to the note it belongs to,
@@ -89,5 +94,8 @@ function initResizer() {
     resizing = false;
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
+    try {
+      localStorage.setItem(KEY_RAW_WIDTH, panel.style.width);
+    } catch {}
   });
 }

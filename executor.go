@@ -56,6 +56,9 @@ func (s *AppState) dispatch(ctx context.Context, req ExecRequest) (string, error
 	case "js", "javascript", "node":
 		return runJSScript(ctx, req.Code)
 
+	case "py", "python", "python3":
+		return runPythonScript(ctx, req.Code)
+
 	case "sql", "postgres", "mysql":
 		return s.withConn("SQL", req, func(c Connection) (string, error) {
 			return executeSQL(ctx, c, req.Code)
@@ -131,6 +134,15 @@ func runJSScript(ctx context.Context, code string) (string, error) {
 		}
 	}
 	return "", errors.New("runtime Node.js atau Bun tidak ditemukan di PATH sistem")
+}
+
+func runPythonScript(ctx context.Context, code string) (string, error) {
+	for _, py := range []string{"python3", "python"} {
+		if _, err := exec.LookPath(py); err == nil {
+			return runCommand(ctx, py, "-c", code)
+		}
+	}
+	return "", errors.New("runtime Python (python3/python) tidak ditemukan di PATH sistem")
 }
 
 // --- Connection-backed runners ---

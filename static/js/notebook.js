@@ -12,6 +12,7 @@ import {
   replaceSegment,
   splitSegments,
 } from './markdown.js';
+import { showConfirmModal, showToast } from './modal.js';
 import { saveNoteContent } from './notes.js';
 import { bus, state } from './state.js';
 import { baseName, escapeHtml } from './util.js';
@@ -110,7 +111,13 @@ export async function deleteBlock(index) {
   if (!target) return;
 
   const what = target.type === 'code' ? `blok kode (${target.lang})` : 'blok teks';
-  if (!confirm(`Hapus ${what} ini?`)) return;
+  const ok = await showConfirmModal({
+    title: 'Hapus Blok',
+    message: `Hapus ${what} ini dari runbook?`,
+    confirmText: 'Hapus',
+    danger: true,
+  });
+  if (!ok) return;
   await updateContent((content) => removeSegment(content, index));
 }
 
@@ -130,7 +137,12 @@ function createMarkdownBlock(seg) {
   const preview = document.createElement('div');
   preview.className = 'md-preview cursor-text';
   preview.title = 'Double click to edit text';
-  preview.innerHTML = DOMPurify.sanitize(marked.parse(renderWikilinks(markdown)));
+  const existingNotesSet = new Set(
+    state.notes.flatMap((n) => [n.name, n.name.split('/').pop()])
+  );
+  preview.innerHTML = DOMPurify.sanitize(
+    marked.parse(renderWikilinks(markdown, existingNotesSet))
+  );
 
   const actions = document.createElement('div');
   actions.className =
@@ -187,6 +199,13 @@ function createMarkdownBlock(seg) {
 
 // --- Code cell ---
 
+function cellFingerprint(noteName, seg) {
+  const code = (seg?.code ?? '').trim();
+  const lang = seg?.lang ?? '';
+  const meta = seg?.metaStr ?? '';
+  return `${noteName ?? ''}#${lang}#${meta}#${code}`;
+}
+
 function createCodeCell(seg) {
   const code = seg.code.trim();
 
@@ -195,6 +214,11 @@ function createCodeCell(seg) {
     'rounded-lg border border-[#222228] bg-[#161619] overflow-hidden my-2 shadow-sm transition hover:border-[#2d2d38]';
   card.dataset.cell = seg.cellIndex;
   card.id = `code-cell-${seg.cellIndex}`;
+
+  const cellKey = cellFingerprint(state.activeNote?.name, seg);
+  card.dataset.cellKey = cellKey;
+  const cached = state.cellOutputs.get(cellKey);
+  const drawerHiddenClass = cached ? '' : 'hidden';
 
   const connBadge = seg.conn
     ? `<span class="text-[10px] font-mono text-[#b8abfa] bg-[#221e3f] border border-[#332b6b] px-1.5 py-0.5 rounded">@conn=${escapeHtml(seg.conn)}</span>`
@@ -228,9 +252,9 @@ function createCodeCell(seg) {
       <textarea data-role="code" class="w-full bg-transparent text-[#ededf0] code-font text-xs leading-relaxed focus:outline-none resize-none font-normal" rows="${Math.max(1, code.split('\n').length)}"></textarea>
     </div>
 
-    <div data-role="drawer" class="hidden border-t border-[#222228] bg-[#0c0c0e]">
+    <div data-role="drawer" class="${drawerHiddenClass} border-t border-[#222228] bg-[#0c0c0e]">
       <div class="px-3.5 py-1.5 border-b border-[#1b1b20] flex items-center justify-between text-xs bg-[#111114]">
-        <div data-role="status" class="flex items-center space-x-2"></div>
+        <div data-role="status" class="flex items-center space-x-2">${cached ? cached.statusHtml : ''}</div>
         <div class="flex items-center space-x-2">
           <button data-action="toggle-drawer" data-role="toggle" class="text-[11px] text-[#8e8e99] hover:text-[#dcdce5] px-1.5 py-0.5 rounded hover:bg-[#1a1a22] transition">
             Collapse ▲
@@ -238,7 +262,7 @@ function createCodeCell(seg) {
           <button data-action="clear-output" title="Clear output" class="text-[11px] text-[#60606b] hover:text-[#f43f5e] px-1 rounded hover:bg-[#1a1a22] transition">✕</button>
         </div>
       </div>
-      <div data-role="body" class="p-3.5 overflow-x-auto max-h-72 text-xs code-font text-[#c9c9d4] whitespace-pre-wrap leading-relaxed select-text"></div>
+      <div data-role="body" class="p-3.5 overflow-x-auto max-h-72 text-xs code-font text-[#c9c9d4] whitespace-pre-wrap leading-relaxed select-text">${cached ? escapeHtml(cached.bodyText) : ''}</div>
     </div>
   `;
 
@@ -273,6 +297,9 @@ export async function runCell(card) {
   const seg = splitSegments(state.activeNote.content ?? '').filter((s) => s.type === 'code')[index];
   if (!seg) return;
 
+  const currentCode = part(card, 'code')?.value ?? seg.code;
+  const cellKey = cellFingerprint(state.activeNote.name, { ...seg, code: currentCode });
+  card.dataset.cellKey = cellKey;
   const drawer = part(card, 'drawer');
   const status = part(card, 'status');
   const body = part(card, 'body');
@@ -303,9 +330,22 @@ export async function runCell(card) {
 
     status.innerHTML = `${badge} <span class="text-[#33333d]">|</span> ${message}`;
     body.textContent = data.output || data.error || '(Process completed with no output)';
+
+    state.cellOutputs.set(cellKey, {
+      statusHtml: status.innerHTML,
+      bodyText: body.textContent,
+      passed,
+    });
+    return { success: true, passed };
   } catch (err) {
     status.innerHTML = '<span class="text-[#f43f5e] font-semibold">Error</span>';
     body.innerHTML = `<span class="text-[#f43f5e]">${escapeHtml(err.message)}</span>`;
+    state.cellOutputs.set(cellKey, {
+      statusHtml: status.innerHTML,
+      bodyText: body.textContent,
+      passed: false,
+    });
+    return { success: false, passed: false };
   }
 }
 
@@ -316,5 +356,42 @@ export function toggleDrawer(card) {
 }
 
 export function clearOutput(card) {
+  if (state.activeNote && card.dataset.cellKey) {
+    state.cellOutputs.delete(card.dataset.cellKey);
+  }
   part(card, 'drawer').classList.add('hidden');
+}
+
+export async function runAllCells() {
+  if (!state.activeNote) return;
+  const cards = Array.from(document.querySelectorAll('#documentFlow [data-cell]'));
+  if (cards.length === 0) {
+    showToast('Tidak ada blok kode di note ini');
+    return;
+  }
+
+  const btnRunAll = $('btnRunAll');
+  if (btnRunAll) {
+    btnRunAll.disabled = true;
+    btnRunAll.classList.add('opacity-50', 'pointer-events-none');
+  }
+
+  showToast(`Menjalankan ${cards.length} blok kode...`);
+  let passedCount = 0;
+  let failedCount = 0;
+
+  for (const card of cards) {
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    const res = await runCell(card);
+    if (res?.passed) passedCount++;
+    else failedCount++;
+  }
+
+  if (btnRunAll) {
+    btnRunAll.disabled = false;
+    btnRunAll.classList.remove('opacity-50', 'pointer-events-none');
+  }
+
+  const summary = `Run All: ${passedCount} PASS, ${failedCount} FAIL (${cards.length} total)`;
+  showToast(summary, failedCount === 0 ? 'success' : 'error', 3500);
 }

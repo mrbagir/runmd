@@ -158,13 +158,16 @@ export async function deleteNote(name) {
     return;
   }
   state.graphData = null;
+  const wasActive = state.activeNote?.name === name;
   await loadNotes();
 
-  if (state.notes.length > 0) {
-    await selectNote(state.notes[0].name);
-  } else {
-    state.activeNote = null;
-    bus.emit('active-changed');
+  if (wasActive) {
+    if (state.notes.length > 0) {
+      await selectNote(state.notes[0].name);
+    } else {
+      state.activeNote = null;
+      bus.emit('active-changed');
+    }
   }
 }
 

@@ -3,6 +3,7 @@
 /* global vis */
 
 import { api } from './api.js';
+import { showToast } from './modal.js';
 import { state } from './state.js';
 
 let network = null;
@@ -111,7 +112,16 @@ export async function renderGraph(onOpenNote) {
 
   network.on('click', (params) => {
     const id = params.nodes[0];
-    if (id !== undefined && !id.startsWith('conn:')) onOpenNote(id);
+    if (id === undefined) return;
+    if (!id.startsWith('conn:')) {
+      onOpenNote(id);
+    } else {
+      const alias = id.replace(/^conn:/, '');
+      const connectedEdges = network.getConnectedEdges(id);
+      const connectedNodes = network.getConnectedNodes(id);
+      network.selectNodes([id, ...connectedNodes], true);
+      showToast(`Koneksi @${alias} terhubung ke ${connectedNodes.length} note`);
+    }
   });
   network.on('hoverNode', () => (container.style.cursor = 'pointer'));
   network.on('blurNode', () => (container.style.cursor = 'default'));

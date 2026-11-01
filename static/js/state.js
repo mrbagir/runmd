@@ -43,6 +43,7 @@ export const state = {
   graphData: null, // cached /api/graph payload; null = needs refetch
   sidebarCollapsed: storageGet(KEY_SIDEBAR) === 'true',
   expandedFolders: loadExpandedFolders(),
+  cellOutputs: new Map(), // key: `${noteName}:${cellIndex}` -> cached execution output
 };
 
 export function setSidebarCollapsed(collapsed) {

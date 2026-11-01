@@ -47,6 +47,15 @@ func TestEvaluateAssertion(t *testing.T) {
 		{"rows > 0", "(0 rows)", true, false},
 		{"rows > 0", "(1 row)", true, true},
 		{"exit_code == 0", "", true, true},
+		{"exit_code != 0", "", false, true},
+		{"exit_code != 0", "", true, false},
+		{"equals:hello world", "hello world", true, true},
+		{"equals:hello world", "hello world ", true, true},
+		{"equals:hello world", "bye", true, false},
+		{"regex:^ORD-\\d+$", "ORD-1234", true, true},
+		{"regex:^ORD-\\d+$", "ORD-xyz", true, false},
+		{"status != 200", "HTTP/2 500 Internal Server Error", true, true},
+		{"status != 200", "HTTP/2 200 OK", true, false},
 		{"unknown rule", "x", true, false}, // typos must not pass silently
 		{"contains:foo", "foo", false, false},
 	}
@@ -131,5 +140,20 @@ func TestRunNoteTest(t *testing.T) {
 	}
 	if _, err := s.RunNoteTest("missing"); err == nil {
 		t.Error("missing note should error")
+	}
+}
+
+func TestPythonExecution(t *testing.T) {
+	s := newTestState(t)
+	res := s.ExecuteBlock(0, ExecRequest{
+		Lang:   "python",
+		Code:   "print('hello from python')",
+		Assert: "contains:hello from python",
+	})
+	if !res.Success {
+		t.Skipf("python runtime not available: %v", res.Error)
+	}
+	if !res.AssertPass {
+		t.Errorf("assertion failed: %s (output: %q)", res.AssertMsg, res.Output)
 	}
 }

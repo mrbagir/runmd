@@ -145,6 +145,70 @@ body {
   color: #b7abff;
 }
 
+/* Wikilink unresolved style */
+.wikilink-unresolved {
+  color: #787888 !important;
+  background: rgba(120, 120, 136, 0.12) !important;
+  border-bottom: 1px dashed #5c5c6e;
+}
+.wikilink-unresolved:hover {
+  background: rgba(120, 120, 136, 0.25) !important;
+  color: #ededf2 !important;
+}
+
+/* Custom Modal Backdrop & Card */
+.modal-backdrop {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 9999 !important;
+  background-color: rgba(0, 0, 0, 0.7) !important;
+  backdrop-filter: blur(4px) !important;
+  -webkit-backdrop-filter: blur(4px) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 1rem !important;
+}
+
+.modal-card {
+  background-color: #141419 !important;
+  border: 1px solid #282836 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
+  padding: 1.25rem !important;
+  width: 100% !important;
+  max-width: 360px !important;
+  color: #ededf0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 1rem !important;
+  animation: modal-pop 0.12s ease-out !important;
+}
+
+@keyframes modal-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.modal-card button {
+  outline: none !important;
+}
+
+.modal-card button:focus-visible {
+  box-shadow: 0 0 0 2px #7c6cf0 !important;
+}
+
 /* Floating insert cell divider */
 .insert-divider {
   position: relative;
@@ -194,4 +258,41 @@ body {
   color: #ffffff;
   background: #2b2659;
   border-color: #3b3475;
+}
+
+/* Toast Notifications */
+.toast-container {
+  position: fixed !important;
+  bottom: 1.25rem !important;
+  right: 1.25rem !important;
+  z-index: 99999 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.5rem !important;
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
+.toast-item {
+  pointer-events: auto !important;
+  padding: 0.5rem 0.875rem !important;
+  border-radius: 6px !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
+  font-size: 0.75rem !important;
+  font-weight: 500 !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+  animation: toast-slide-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition: opacity 0.2s ease, transform 0.2s ease !important;
+}
+
+@keyframes toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }

@@ -25,7 +25,9 @@ export function parseMeta(metaStr) {
     // Remove key=value pairs first so "@x" inside a quoted assert is ignored.
     const rest = metaStr.replace(new RegExp(META_SRC, 'g'), ' ');
     const bare = rest.match(/(?:^|\s)@([a-zA-Z0-9_-]+)(?=\s|$)/);
-    if (bare) conn = bare[1];
+    if (bare && !['conn', 'assert', 'param'].includes(bare[1].toLowerCase())) {
+      conn = bare[1];
+    }
   }
   return { meta, conn, assert: meta.assert || '' };
 }
@@ -109,13 +111,26 @@ export function buildFence(lang, metaStr, code) {
  * [[target]], [[target|text]], [[target#heading]], [[target#heading|text]].
  * Every interpolated value is escaped; no inline JS is emitted.
  */
-export function renderWikilinks(markdown) {
+export function renderWikilinks(markdown, existingNotes = null) {
   return markdown.replace(new RegExp(WIKILINK_SRC, 'g'), (_match, target, alias) => {
     const clean = target.trim().replace(/\.md$/, '');
     const text = alias ? alias.trim() : clean.split('/').pop();
+    const isUnresolved =
+      existingNotes &&
+      !existingNotes.has(clean) &&
+      !existingNotes.has(clean.split('/').pop());
+
+    const classes = isUnresolved
+      ? 'wikilink wikilink-unresolved text-[#737380] hover:text-[#dcdce5] underline decoration-dashed'
+      : 'wikilink text-[#a78bfa] hover:text-[#c4b5fd] underline';
+
+    const titleAttr = isUnresolved
+      ? `Note '${clean}' belum dibuat (klik untuk membuat)`
+      : clean;
+
     return (
-      `<a href="#" class="wikilink" data-action="select-note" ` +
-      `data-name="${escapeHtml(clean)}" title="${escapeHtml(clean)}">${escapeHtml(text)}</a>`
+      `<a href="#" class="${classes}" data-action="select-note" ` +
+      `data-name="${escapeHtml(clean)}" ${isUnresolved ? 'data-unresolved="true"' : ''} title="${escapeHtml(titleAttr)}">${escapeHtml(text)}</a>`
     );
   });
 }

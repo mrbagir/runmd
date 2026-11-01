@@ -2,15 +2,17 @@
 // shortcuts and ONE delegated click handler for every [data-action] element.
 
 import { renderGraph } from './graph.js';
+import { showConfirmModal, showToast } from './modal.js';
 import {
   clearOutput,
   deleteBlock,
   initNotebook,
   insertBlock,
+  runAllCells,
   runCell,
   toggleDrawer,
 } from './notebook.js';
-import { loadConnections, loadNotes, noteNameFromUrl, selectNote } from './notes.js';
+import { createNote, loadConnections, loadNotes, noteNameFromUrl, selectNote } from './notes.js';
 import { initRawSource, toggleRawSource } from './rawsource.js';
 import {
   closeNoteMenuOnOutsideClick,
@@ -62,7 +64,18 @@ const actions = {
   'new-note': () => promptNewNote(),
   'new-note-in-folder': (el) => promptNewNoteInFolder(el.dataset.path),
   'toggle-folder': (el) => onToggleFolder(el.dataset.path),
-  'select-note': (el) => selectNote(el.dataset.name),
+  'select-note': async (el) => {
+    const name = el.dataset.name;
+    const ok = await selectNote(name);
+    if (!ok && (el.dataset.unresolved === 'true' || el.classList.contains('wikilink'))) {
+      const create = await showConfirmModal({
+        title: 'Note Belum Ada',
+        message: `Note '${name}.md' belum dibuat. Apakah Anda ingin membuat note baru ini sekarang?`,
+        confirmText: 'Buat Note',
+      });
+      if (create) await createNote(name);
+    }
+  },
   'open-note-menu': (el) => openNoteMenu(el.dataset.name, el),
   'rename-note': (el) => promptRenameNote(el.dataset.name),
   'delete-note': (el) => confirmDeleteNote(el.dataset.name),
@@ -74,6 +87,7 @@ const actions = {
   'insert-block': (el) => insertBlock(Number(el.dataset.index), el.dataset.type),
   'delete-block': (el) => deleteBlock(Number(el.dataset.index)),
   'run-cell': (el) => runCell(el.closest('[data-cell]')),
+  'run-all-blocks': () => runAllCells(),
   'toggle-drawer': (el) => toggleDrawer(el.closest('[data-cell]')),
   'clear-output': (el) => clearOutput(el.closest('[data-cell]')),
 };
@@ -101,6 +115,9 @@ window.addEventListener('keydown', (e) => {
   } else if (key === 'b' || key === '\\') {
     e.preventDefault();
     toggleSidebar();
+  } else if (key === 's') {
+    e.preventDefault();
+    showToast('Note tersimpan', 'success');
   }
 });
 

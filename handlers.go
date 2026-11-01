@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -135,15 +136,37 @@ func (s *AppState) handleListConnections(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, s.Connections())
 }
 
+var connAliasRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
 func (s *AppState) handleSaveConnection(w http.ResponseWriter, r *http.Request) {
 	var c Connection
 	if !decodeJSON(w, r, &c) {
 		return
 	}
+	c.Alias = strings.TrimPrefix(strings.TrimSpace(c.Alias), "@")
+	c.URI = strings.TrimSpace(c.URI)
 	if c.Alias == "" || c.URI == "" {
-		writeError(w, http.StatusBadRequest, "alias and uri required")
+		writeError(w, http.StatusBadRequest, "alias dan URI wajib diisi")
 		return
 	}
+	if !connAliasRegex.MatchString(c.Alias) {
+		writeError(w, http.StatusBadRequest, "alias hanya boleh berisi huruf, angka, underscore, dan tanda hubung")
+		return
+	}
+	normalizedType := strings.ToLower(strings.TrimSpace(c.Type))
+	switch {
+	case strings.Contains(normalizedType, "sql"):
+		c.Type = "sql"
+	case strings.Contains(normalizedType, "redis"):
+		c.Type = "redis"
+	case strings.Contains(normalizedType, "rabbit") || strings.Contains(normalizedType, "amqp"):
+		c.Type = "rabbitmq"
+	case strings.Contains(normalizedType, "mcp"):
+		c.Type = "mcp"
+	default:
+		c.Type = normalizedType
+	}
+
 	conns, err := s.SetConnection(c)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "gagal menyimpan koneksi: "+err.Error())

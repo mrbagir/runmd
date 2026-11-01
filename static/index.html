@@ -117,6 +117,10 @@
       <div class="flex items-center space-x-3">
         <span id="activeNoteTitle" class="text-xs text-[#a0a0ab] font-mono"></span>
         <div class="h-3.5 w-px bg-[#26262d]"></div>
+        <button id="btnRunAll" data-action="run-all-blocks" title="Run all code blocks sequentially in this runbook" class="flex items-center gap-1.5 text-[11px] text-[#10b981] hover:text-[#34d399] px-2 py-0.5 rounded hover:bg-[#1a1a20] transition border border-[#1b3a2b] bg-[#102219]/60 font-medium cursor-pointer">
+          <svg class="w-2.5 h-2.5 fill-current" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          <span>Run All</span>
+        </button>
         <button id="btnRawToggle" data-action="toggle-raw" title="Toggle View Source (Ctrl/Cmd+E)" class="text-[11px] text-[#787885] hover:text-[#c4c4cf] px-2 py-0.5 rounded hover:bg-[#1a1a20] transition">
           View Source
         </button>
